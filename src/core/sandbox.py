@@ -228,9 +228,33 @@ class ShadowSandbox:
                 limit_value=None,
             )
 
-        # ── 2. Apply delta to shadow clone ─────────────────────────────────
-        row_idx = self._shadow_df.index[row_mask][0]
-        current_value: float = float(self._shadow_df.at[row_idx, target_column])
+        # ── 2. Apply delta to a fresh clone (never mutate _shadow_df) ─────
+        sandbox_copy = self._shadow_df.copy(deep=True)
+        row_idx = sandbox_copy.index[row_mask][0]
+        current_value: float = float(sandbox_copy.at[row_idx, target_column])
+
+        # Guard against NaN/Inf in current value
+        if pd.isna(current_value) or not pd.api.types.is_float(current_value) and not pd.api.types.is_integer(current_value):
+            try:
+                current_value = float(current_value)
+            except (ValueError, TypeError):
+                pass
+        if pd.isna(current_value):
+            reason = (
+                f"SANDBOX REJECTION — Invalid Current Value: "
+                f"Column '{target_column}' for row '{row_primary_key}' "
+                f"contains NaN/null. Cannot apply delta to a missing value."
+            )
+            logger.warning(reason)
+            return SandboxResult(
+                status="REJECTED",
+                validated_state=None,
+                rejection_reason=reason,
+                proposed_value=float("nan"),
+                current_value=float("nan"),
+                limit_value=None,
+            )
+
         proposed_value: float = current_value + delta
         limit_value: float | None = None
 
@@ -261,9 +285,10 @@ class ShadowSandbox:
 
         if applicable_rule is not None:
             limit_col_name = applicable_rule.limit_column
-            if limit_col_name in self._shadow_df.columns:
-                limit_value = float(self._shadow_df.at[row_idx, limit_col_name])
-                if proposed_value > limit_value:
+            if limit_col_name in sandbox_copy.columns:
+                raw_limit = sandbox_copy.at[row_idx, limit_col_name]
+                limit_value = float(raw_limit) if not pd.isna(raw_limit) else None
+                if limit_value is not None and proposed_value > limit_value:
                     reason = (
                         f"SANDBOX REJECTION — Upper Bound Constraint Violated: "
                         f"Applying delta {delta:+.2f} to '{target_column}' "
@@ -283,9 +308,9 @@ class ShadowSandbox:
                         limit_value=limit_value,
                     )
 
-        # ── 5. All constraints passed — commit to shadow clone ─────────────
-        self._shadow_df.at[row_idx, target_column] = proposed_value
-        validated_snapshot = self._shadow_df.copy(deep=True)
+        # ── 5. All constraints passed — return validated snapshot ──────────
+        sandbox_copy.at[row_idx, target_column] = proposed_value
+        validated_snapshot = sandbox_copy
 
         logger.info(
             "Sandbox SAFE | pk=%s | col=%s | delta=%+.2f | "

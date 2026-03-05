@@ -38,13 +38,11 @@ import pandas as pd
 from src.core.config import (
     AGENT_FALLBACKS,
     AGENT_IDS,
-    DATA_DIR,
     DEFAULT_TRUST_SCORE,
-    INVENTORY_CSV,
+    DEFAULT_WORKSPACE,
     MAX_TRUST_SCORE,
     MIN_TRUST_SCORE,
-    TRANSACTION_LOG_CSV,
-    AGENT_TRUST_SCORES_JSON,
+    WORKSPACES_DIR,
 )
 
 logger = logging.getLogger(__name__)
@@ -212,23 +210,43 @@ class FactoryDataManager:
         _write_lock (threading.Lock): Guards all state-mutating operations.
     """
 
-    def __init__(self) -> None:
-        """Initialise the data manager.
+    def __init__(self, workspace: str = DEFAULT_WORKSPACE) -> None:
+        """Initialise the data manager for a named workspace.
 
-        Creates the ``data/`` directory if absent, then loads each artefact from
-        disk.  If an artefact does not exist a realistic mock dataset is written
-        to disk first so that all subsequent operations have a consistent base.
+        Each workspace has its own isolated directory under ``data/workspaces/``
+        containing ``inventory.csv``, ``transaction_log.csv``, and
+        ``agent_trust_scores.json``.
+
+        Args:
+            workspace: Name of the workspace (used as subdirectory name).
 
         Raises:
             OSError: If the data directory cannot be created.
             ValueError: If an existing CSV contains unexpected columns.
         """
+        # Sanitize workspace name to prevent path traversal
+        if ".." in workspace or "/" in workspace or "\\" in workspace:
+            raise ValueError(f"Invalid workspace name: '{workspace}'")
+        self._workspace: str = workspace
+        self._workspace_dir: Path = WORKSPACES_DIR / workspace
+        self._inventory_csv: Path = self._workspace_dir / "inventory.csv"
+        self._transaction_log_csv: Path = self._workspace_dir / "transaction_log.csv"
+        self._trust_scores_json: Path = self._workspace_dir / "agent_trust_scores.json"
+
         self._write_lock: threading.Lock = threading.Lock()
         self._ensure_data_directory()
 
         self._inventory: pd.DataFrame = self._load_or_create_inventory()
         self._transaction_log: pd.DataFrame = self._load_or_create_transaction_log()
         self._trust_scores: dict[str, Any] = self._load_or_create_trust_scores()
+
+        # Cached schema profile — invalidated when the inventory DataFrame changes.
+        self._schema_cache: SchemaProfile | None = None
+
+        # Per-session staging queue for two-phase commit (HITL approval).
+        # Changes are STAGED here by propose_state_change and only COMMITTED
+        # when the human clicks "Approve & Execute" in the UI.
+        self.pending_changes: list[dict[str, Any]] = []
 
         logger.info(
             "FactoryDataManager initialised. Inventory rows: %d | "
@@ -243,14 +261,14 @@ class FactoryDataManager:
     # ------------------------------------------------------------------
 
     def _ensure_data_directory(self) -> None:
-        """Create the ``data/`` directory (and parents) if it does not exist.
+        """Create the workspace directory (and parents) if it does not exist.
 
         Raises:
             OSError: Propagated from ``Path.mkdir`` if creation fails due to
                 permission errors or invalid path.
         """
-        DATA_DIR.mkdir(parents=True, exist_ok=True)
-        logger.debug("Data directory confirmed at: %s", DATA_DIR)
+        self._workspace_dir.mkdir(parents=True, exist_ok=True)
+        logger.debug("Workspace directory confirmed at: %s", self._workspace_dir)
 
     def _load_or_create_inventory(self) -> pd.DataFrame:
         """Load inventory from disk, or create and persist a mock dataset.
@@ -261,17 +279,17 @@ class FactoryDataManager:
         Raises:
             ValueError: If the CSV exists but is missing required columns.
         """
-        if INVENTORY_CSV.exists():
+        if self._inventory_csv.exists():
             # Let pandas infer dtypes naturally instead of forcing str.
             # This allows DynamicSchemaInferencer to accurately detect numeric columns.
-            df = pd.read_csv(INVENTORY_CSV)
-            logger.info("Loaded dynamic inventory from %s (%d rows).", INVENTORY_CSV, len(df))
+            df = pd.read_csv(self._inventory_csv)
+            logger.info("Loaded dynamic inventory from %s (%d rows).", self._inventory_csv, len(df))
             return df
 
         logger.warning("inventory.csv not found. Generating mock dataset.")
         df = _build_mock_inventory()
-        df.to_csv(INVENTORY_CSV, index=False)
-        logger.info("Mock inventory written to %s.", INVENTORY_CSV)
+        df.to_csv(self._inventory_csv, index=False)
+        logger.info("Mock inventory written to %s.", self._inventory_csv)
         return df
 
     def _load_or_create_transaction_log(self) -> pd.DataFrame:
@@ -283,8 +301,8 @@ class FactoryDataManager:
         Raises:
             ValueError: If the CSV exists but is missing required columns.
         """
-        if TRANSACTION_LOG_CSV.exists():
-            df = pd.read_csv(TRANSACTION_LOG_CSV, dtype=str)
+        if self._transaction_log_csv.exists():
+            df = pd.read_csv(self._transaction_log_csv, dtype=str)
             if df.empty:
                 # File exists but is empty (header only) — acceptable.
                 df = _build_empty_transaction_log()
@@ -298,15 +316,15 @@ class FactoryDataManager:
                     df[col] = df[col].astype(dtype)
             logger.info(
                 "Loaded transaction log from %s (%d rows).",
-                TRANSACTION_LOG_CSV,
+                self._transaction_log_csv,
                 len(df),
             )
             return df
 
         logger.warning("transaction_log.csv not found. Creating empty ledger.")
         df = _build_empty_transaction_log()
-        df.to_csv(TRANSACTION_LOG_CSV, index=False)
-        logger.info("Empty transaction log written to %s.", TRANSACTION_LOG_CSV)
+        df.to_csv(self._transaction_log_csv, index=False)
+        logger.info("Empty transaction log written to %s.", self._transaction_log_csv)
         return df
 
     def _load_or_create_trust_scores(self) -> dict[str, Any]:
@@ -318,17 +336,17 @@ class FactoryDataManager:
         Raises:
             json.JSONDecodeError: If the JSON file is present but malformed.
         """
-        if AGENT_TRUST_SCORES_JSON.exists():
-            with AGENT_TRUST_SCORES_JSON.open("r", encoding="utf-8") as f:
+        if self._trust_scores_json.exists():
+            with self._trust_scores_json.open("r", encoding="utf-8") as f:
                 data = json.load(f)
-            logger.info("Loaded trust scores from %s.", AGENT_TRUST_SCORES_JSON)
+            logger.info("Loaded trust scores from %s.", self._trust_scores_json)
             return data
 
         logger.warning("agent_trust_scores.json not found. Generating defaults.")
         data = _build_default_trust_scores()
-        with AGENT_TRUST_SCORES_JSON.open("w", encoding="utf-8") as f:
+        with self._trust_scores_json.open("w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
-        logger.info("Default trust scores written to %s.", AGENT_TRUST_SCORES_JSON)
+        logger.info("Default trust scores written to %s.", self._trust_scores_json)
         return data
 
     # ------------------------------------------------------------------
@@ -339,26 +357,135 @@ class FactoryDataManager:
         """Write the in-memory inventory frame to disk atomically.
 
         Must be called while ``_write_lock`` is already held by the caller.
+        Writes to a temp file first, then atomically replaces to prevent corruption.
         """
-        self._inventory.to_csv(INVENTORY_CSV, index=False)
-        logger.debug("Inventory flushed to %s.", INVENTORY_CSV)
+        tmp = self._inventory_csv.with_suffix(".csv.tmp")
+        self._inventory.to_csv(tmp, index=False)
+        tmp.replace(self._inventory_csv)
+        logger.debug("Inventory flushed to %s.", self._inventory_csv)
 
     def _flush_transaction_log(self) -> None:
         """Append the in-memory log frame to disk.
 
         Must be called while ``_write_lock`` is already held by the caller.
         """
-        self._transaction_log.to_csv(TRANSACTION_LOG_CSV, index=False)
-        logger.debug("Transaction log flushed to %s.", TRANSACTION_LOG_CSV)
+        tmp = self._transaction_log_csv.with_suffix(".csv.tmp")
+        self._transaction_log.to_csv(tmp, index=False)
+        tmp.replace(self._transaction_log_csv)
+        logger.debug("Transaction log flushed to %s.", self._transaction_log_csv)
 
     def _flush_trust_scores(self) -> None:
         """Serialise the trust score dict to JSON on disk.
 
         Must be called while ``_write_lock`` is already held by the caller.
         """
-        with AGENT_TRUST_SCORES_JSON.open("w", encoding="utf-8") as f:
+        tmp = self._trust_scores_json.with_suffix(".json.tmp")
+        with tmp.open("w", encoding="utf-8") as f:
             json.dump(self._trust_scores, f, indent=2)
-        logger.debug("Trust scores flushed to %s.", AGENT_TRUST_SCORES_JSON)
+        tmp.replace(self._trust_scores_json)
+        logger.debug("Trust scores flushed to %s.", self._trust_scores_json)
+
+    # ------------------------------------------------------------------
+    # Public: Workspace management
+    # ------------------------------------------------------------------
+
+    @property
+    def workspace(self) -> str:
+        """Return the name of the active workspace."""
+        return self._workspace
+
+    @property
+    def workspace_dir(self) -> Path:
+        """Return the directory path of the active workspace."""
+        return self._workspace_dir
+
+    def save_metadata(self, original_filename: str = "") -> None:
+        """Write workspace metadata to disk (timestamps, row count, etc.)."""
+        meta_path = self._workspace_dir / "metadata.json"
+        existing: dict[str, Any] = {}
+        if meta_path.exists():
+            with meta_path.open("r", encoding="utf-8") as f:
+                existing = json.load(f)
+
+        now_iso = datetime.now(tz=timezone.utc).isoformat()
+        meta = {
+            "workspace_name": self._workspace,
+            "created_at": existing.get("created_at", now_iso),
+            "last_updated": now_iso,
+            "row_count": len(self._inventory),
+            "column_count": len(self._inventory.columns),
+            "original_filename": original_filename or existing.get("original_filename", ""),
+            "update_count": existing.get("update_count", 0) + 1,
+            "transaction_count": len(self._transaction_log),
+        }
+        with meta_path.open("w", encoding="utf-8") as f:
+            json.dump(meta, f, indent=2)
+
+    @staticmethod
+    def get_workspace_metadata(name: str) -> dict[str, Any]:
+        """Read metadata for a workspace, returning empty dict if missing."""
+        meta_path = WORKSPACES_DIR / name / "metadata.json"
+        if meta_path.exists():
+            with meta_path.open("r", encoding="utf-8") as f:
+                return json.load(f)
+        return {}
+
+    @staticmethod
+    def list_workspaces() -> list[str]:
+        """Return sorted names of all workspaces on disk."""
+        if not WORKSPACES_DIR.exists():
+            return []
+        return sorted(
+            d.name for d in WORKSPACES_DIR.iterdir()
+            if d.is_dir() and (d / "inventory.csv").exists()
+        )
+
+    @staticmethod
+    def delete_workspace(name: str) -> bool:
+        """Delete a workspace and all its data from disk.
+
+        Args:
+            name: Workspace name to delete.
+
+        Returns:
+            True if the workspace was deleted, False if it didn't exist.
+
+        Raises:
+            ValueError: If the name contains path traversal characters.
+        """
+        # Guard against path traversal
+        if ".." in name or "/" in name or "\\" in name:
+            raise ValueError(f"Invalid workspace name: '{name}'")
+        ws_dir = WORKSPACES_DIR / name
+        # Verify resolved path is still under WORKSPACES_DIR
+        if not ws_dir.resolve().is_relative_to(WORKSPACES_DIR.resolve()):
+            raise ValueError(f"Invalid workspace path: '{name}'")
+        if not ws_dir.exists():
+            return False
+        import shutil
+        shutil.rmtree(ws_dir)
+        logger.info("Workspace '%s' deleted from disk.", name)
+        return True
+
+    def update_inventory_data(self, new_df: pd.DataFrame) -> None:
+        """Replace inventory with fresh data while preserving history.
+
+        Used for weekly/monthly data refreshes. The transaction log and
+        trust scores are kept intact so agent history carries over.
+
+        Args:
+            new_df: The new inventory DataFrame.
+        """
+        with self._write_lock:
+            self._inventory = new_df
+            self._flush_inventory()
+            self._schema_cache = None  # Invalidate — columns may have changed
+            self.pending_changes.clear()
+        logger.info(
+            "Inventory updated in-place for workspace '%s'. Rows: %d. "
+            "Transaction log and trust scores preserved.",
+            self._workspace, len(new_df),
+        )
 
     # ------------------------------------------------------------------
     # Public: Read operations
@@ -381,15 +508,29 @@ class FactoryDataManager:
         """
         return self._inventory.copy(deep=True)
 
+    def get_schema_profile(self) -> SchemaProfile:
+        """Return the cached schema profile, inferring it on first access.
+
+        The profile is cached for the lifetime of this manager instance and
+        invalidated whenever the inventory DataFrame is mutated (via
+        ``update_inventory``) or replaced (via CSV upload, which creates a
+        new ``FactoryDataManager``).
+
+        Returns:
+            The inferred ``SchemaProfile`` for the current inventory.
+        """
+        if self._schema_cache is None:
+            from src.core.schema_engine import DynamicSchemaInferencer
+            self._schema_cache = DynamicSchemaInferencer(self._inventory).infer()
+        return self._schema_cache
+
     def _detect_primary_key(self) -> str:
-        """Detect the primary key column dynamically using schema inference.
+        """Detect the primary key column using the cached schema profile.
 
         Returns:
             The name of the primary key column detected in the current dataset.
         """
-        from src.core.schema_engine import DynamicSchemaInferencer
-        profile = DynamicSchemaInferencer(self._inventory).infer()
-        return profile.primary_key_column
+        return self.get_schema_profile().primary_key_column
 
     def get_item(self, item_id: str) -> dict[str, Any]:
         """Return the details of a single inventory item as a plain dictionary.
@@ -431,6 +572,24 @@ class FactoryDataManager:
         """
         return self._transaction_log.copy(deep=True)
 
+    def reset_for_new_dataset(self) -> None:
+        """Reset trust scores and transaction log for a fresh dataset.
+
+        Called when a new CSV is uploaded so that decision history from
+        the previous dataset does not leak into analyst verdicts.
+        """
+        with self._write_lock:
+            self._trust_scores = _build_default_trust_scores()
+            self._flush_trust_scores()
+
+            self._transaction_log = _build_empty_transaction_log()
+            self._flush_transaction_log()
+
+            self.pending_changes.clear()
+            self._schema_cache = None
+
+        logger.info("Trust scores, transaction log, and pending changes reset for new dataset.")
+
     def get_trust_scores(self) -> dict[str, Any]:
         """Return the current agent trust score dictionary.
 
@@ -445,7 +604,7 @@ class FactoryDataManager:
     # Public: Write operations
     # ------------------------------------------------------------------
 
-    def update_inventory(self, item_id: str, target_column: str, quantity_change: int) -> bool:
+    def update_inventory(self, item_id: str, target_column: str, quantity_change: float) -> bool:
         """Update a numeric column for a given row and persist to disk.
 
         This method is fully dynamic — it detects the primary key column
@@ -482,8 +641,7 @@ class FactoryDataManager:
             new_value = current + quantity_change
 
             # Check for schema-inferred constraint (e.g., stock <= capacity)
-            from src.core.schema_engine import DynamicSchemaInferencer
-            profile = DynamicSchemaInferencer(self._inventory).infer()
+            profile = self.get_schema_profile()
             for rule in profile.constraint_rules:
                 if rule.mutable_column == target_column:
                     limit_value = float(self._inventory.at[idx, rule.limit_column])
@@ -502,6 +660,7 @@ class FactoryDataManager:
 
             self._inventory.at[idx, target_column] = new_value
             self._flush_inventory()
+            self._schema_cache = None  # Invalidate — data values changed
 
             logger.info(
                 "Inventory updated | pk=%s | col=%s | old=%.2f | new=%.2f | limit=%.2f",
@@ -553,11 +712,9 @@ class FactoryDataManager:
             ...     sandbox_approved=True,
             ... )
         """
-        if agent_id not in AGENT_IDS:
-            raise ValueError(
-                f"Unknown agent_id '{agent_id}'. "
-                f"Valid agent IDs are: {list(AGENT_IDS)}"
-            )
+        # Log transactions from any agent (including sub-agents and HITL)
+        if not agent_id:
+            agent_id = "unknown"
 
         record: dict[str, Any] = {
             "transaction_id": str(uuid.uuid4()),

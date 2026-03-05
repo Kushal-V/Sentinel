@@ -1,0 +1,39 @@
+ Crisis queries for the new datasets:
+
+  1. Pharmaceutical Warehouse:
+  Cold storage WH-COLD-A compressor failure — temperature rising to 15C. Insulin
+   pens at only 800 of 5000 capacity with 90 days expiry. Insulin vials even
+  worse at 450 units with only 75 days left. Flu vaccine stock at just 200 of
+  10000 capacity, expires in 45 days. COVID booster only 30 days from expiry
+  with 1500 units. Fentanyl patches audit due — only 85 units in secure storage.
+   EpiPen stock at 950 of 3000 and we have a seasonal allergy surge incoming.
+  Dexamethasone in cold storage also at risk.
+
+  2. Electronics Manufacturing:
+  Taiwan typhoon has shut all TSMC shipments. ARM Cortex-M4 and M7 MCUs face
+  120+ day lead times. OLED 6-inch panels at only 600 of 10000 — Samsung Display
+   production halted due to fab fire. 14-inch OLED panels at just 250 units.
+  LiDAR ToF modules critically low at 800 of 5000 with 90-day lead time. 5G
+  modem modules at 1100 of 8000 and Qualcomm has allocation constraints. LiPo
+  3000mAh cells at 4500 of 25000 — new product launch demands 400% more. DDR5
+  memory at 3200 of 15000 with SK Hynix supply shortage.
+
+  3. Food Cold Chain:
+  Refrigeration failure at DC-COLD-NORTH — temperature spiked to 8C. Sashimi
+  grade tuna has only 2 days shelf life with 350kg on hand. Fresh salmon at 3
+  days remaining with 1200kg at risk. Chicken wings expiring in 4 days. Fresh
+  mozzarella at 7 days. Butter croissants at DC-AMBIENT-WEST have only 2 days
+  left with 1500kg. Strawberries at 4 days shelf life. Heavy cream at 12 days
+  but temperature breach may accelerate spoilage. Baby spinach at 5 days. King
+  crab legs in frozen at 400 of 2000 capacity — supplier shipment from Alaska
+  delayed 3 weeks.
+
+  4. Automotive Parts:
+  Major recall on front brake pads AUTO-BRK-PAD-F from Brembo due to material
+  defect — quarantine all 3400 units. Front brake calipers also under
+  investigation — 450 units. CVT transmission at only 35 units with 12-week lead
+   from Jatco and fleet order demanding 200 units. HV battery modules at 25 of
+  15 reorder point but CATL has 16-week lead time and EV production line stops
+  in 2 weeks. Rear differential at 45 units with 10-week lead. Oil pump assembly
+   at 180 units but Dana factory in UK had a fire. Front driveshaft at only 110
+  units. A/C compressor shortage — Denso allocation cut by 40%.

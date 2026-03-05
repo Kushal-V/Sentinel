@@ -14,8 +14,7 @@ Paradigm
 * **Tools gate execution.**  They validate *whether* it is physically possible
   before allowing any state mutation.
 * **The Sandbox validates first.**  ``propose_state_change`` always routes
-  through ``ShadowSandbox.evaluate_proposal`` before calling
-  ``FactoryDataManager.update_inventory``.
+  through ``ShadowSandbox.evaluate_proposal`` before staging the change.
 
 Tool Call Order (enforced via docstrings)
 -----------------------------------------
@@ -28,75 +27,113 @@ Tool Call Order (enforced via docstrings)
 
 Singleton Pattern
 -----------------
-The module maintains a single ``_data_manager`` instance via
-``get_data_manager()``.  This is intentional: Streamlit re-runs the entire
-script on widget interaction, and we must ensure all agents share the same
-in-memory DataFrame across a session rather than creating independent copies.
+The module maintains a settable ``_data_manager`` reference via
+``get_data_manager()`` / ``set_data_manager()``.  In the Streamlit app,
+``app.py`` calls ``set_data_manager(ss.manager)`` on every rerun so that
+tools always operate on the same per-session ``FactoryDataManager`` instance
+stored in ``st.session_state``.
 """
 
 from __future__ import annotations
 
 import json
 import logging
-from functools import lru_cache
+import re
 from typing import Any
 
+import pandas as pd
+
+from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 
 from src.core.sandbox import SandboxResult, ShadowSandbox
-from src.core.schema_engine import DynamicSchemaInferencer
 from src.core.state_manager import FactoryDataManager
 
 logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Singleton Data Manager
+# Settable Data Manager Singleton
 # ---------------------------------------------------------------------------
 
-@lru_cache(maxsize=1)
-def get_data_manager() -> FactoryDataManager:
-    """Return (or create) the singleton ``FactoryDataManager`` instance.
+_data_manager: FactoryDataManager | None = None
 
-    Uses ``functools.lru_cache`` with ``maxsize=1`` so that repeated calls
-    within the same Python interpreter session always return the same object.
-    This is critical under Streamlit's re-run model: the same live DataFrame
-    must be shared by all agents in a session.
+
+def set_data_manager(dm: FactoryDataManager) -> None:
+    """Inject the session-scoped ``FactoryDataManager`` instance.
+
+    Called by ``app.py`` on every Streamlit rerun so that all tools operate
+    on the same in-memory state as the UI and orchestrator.  This ensures
+    per-session isolation: each Streamlit session's ``st.session_state.manager``
+    is the single source of truth.
+
+    Args:
+        dm: The ``FactoryDataManager`` instance from ``st.session_state``.
+    """
+    global _data_manager
+    _data_manager = dm
+    logger.debug("Tool registry data manager set to %s.", id(dm))
+
+
+def get_data_manager() -> FactoryDataManager:
+    """Return the active ``FactoryDataManager`` instance.
+
+    If ``set_data_manager`` has not been called yet (e.g. during tests or
+    standalone tool usage), a fresh instance is created as a fallback.
 
     Returns:
-        The singleton ``FactoryDataManager``.
+        The active ``FactoryDataManager``.
     """
-    logger.info("Initialising singleton FactoryDataManager.")
-    return FactoryDataManager()
+    global _data_manager
+    if _data_manager is None:
+        logger.info("No data manager injected — creating standalone instance.")
+        _data_manager = FactoryDataManager()
+    return _data_manager
 
 
 # ---------------------------------------------------------------------------
 # Two-Phase Commit — Staging Queue for HITL Approval
 # ---------------------------------------------------------------------------
 
-#: Global staging list. Each entry is a dict with keys:
-#:   row_key, target_column, delta, justification, old_value, new_value,
-#:   limit_value, financial_impact, agent_id
-#: Changes are STAGED here by propose_state_change and only COMMITTED
-#: when the human clicks "Approve & Execute" in the UI.
-pending_changes: list[dict[str, Any]] = []
-
-
 def commit_pending_changes() -> list[dict[str, Any]]:
     """Commit all staged changes to the live FactoryDataManager.
 
-    Called by the HITL approval flow in app.py. Returns the list of
-    committed changes for display.
+    Called by the HITL approval flow in ``app.py``.  Each staged change is
+    **re-validated** against the current inventory state via the Shadow Sandbox
+    before being applied.  This guards against stale deltas: if the data changed
+    between staging and approval, the sandbox will reject the now-invalid change.
+
+    Returns:
+        List of successfully committed change dicts for display.
     """
-    global pending_changes
     dm = get_data_manager()
-    committed = []
-    for change in pending_changes:
+    committed: list[dict[str, Any]] = []
+
+    for change in dm.pending_changes:
+        # Re-validate against the CURRENT state (not the stale staging-time state)
+        live_df = dm.get_inventory()
+        sandbox = ShadowSandbox(live_df)
+        result: SandboxResult = sandbox.evaluate_proposal(
+            row_primary_key=change["row_key"],
+            target_column=change["target_column"],
+            delta=change["delta"],
+        )
+
+        if result.status == "REJECTED":
+            logger.warning(
+                "HITL COMMIT SKIPPED (stale) | row=%s | col=%s | delta=%+.2f | reason=%s",
+                change["row_key"],
+                change["target_column"],
+                change["delta"],
+                result.rejection_reason,
+            )
+            continue
+
         try:
             dm.update_inventory(
                 item_id=change["row_key"],
                 target_column=change["target_column"],
-                quantity_change=int(change["delta"]),
+                quantity_change=change["delta"],
             )
             dm.log_transaction(
                 event_id="AGENT_ACTION",
@@ -119,7 +156,13 @@ def commit_pending_changes() -> list[dict[str, Any]]:
             )
         except Exception as exc:
             logger.error("Failed to commit staged change: %s", exc, exc_info=True)
-    pending_changes = []
+
+    # Only clear committed changes; keep failed ones for retry
+    committed_keys = {(c["row_key"], c["target_column"]) for c in committed}
+    dm.pending_changes = [
+        c for c in dm.pending_changes
+        if (c["row_key"], c["target_column"]) not in committed_keys
+    ]
     return committed
 
 
@@ -128,11 +171,60 @@ def discard_pending_changes() -> int:
 
     Returns the count of changes discarded.
     """
-    global pending_changes
-    count = len(pending_changes)
-    pending_changes = []
+    dm = get_data_manager()
+    count = len(dm.pending_changes)
+    dm.pending_changes = []
     logger.info("Discarded %d staged changes.", count)
     return count
+
+
+# ---------------------------------------------------------------------------
+# Groq XML Tool-Call Recovery Helper
+# ---------------------------------------------------------------------------
+
+def parse_groq_xml_tool_call(error_str: str) -> tuple[str, dict[str, Any]] | None:
+    """Parse a Groq XML tool call from an API error message.
+
+    Groq/Llama models sometimes emit ``<function=name>args</function>`` XML
+    instead of proper JSON tool calls, causing a 400 error.  This function
+    extracts the tool name and arguments from the error string so the
+    orchestrator can execute the intended tool call.
+
+    Args:
+        error_str: The string representation of the Groq API error.
+
+    Returns:
+        A ``(tool_name, args_dict)`` tuple, or ``None`` if no XML tool call
+        was found in the error string.
+    """
+    match = re.search(
+        r"<function=(\w+)[^>]*>(.*?)</function>"
+        r"|<function=(\w+)(.*?)</function>",
+        error_str,
+    )
+    if not match:
+        return None
+
+    tool_name = match.group(1) or match.group(3)
+    args_str = (match.group(2) or match.group(4) or "").strip()
+
+    try:
+        args = json.loads(args_str)
+    except (json.JSONDecodeError, ValueError):
+        # Fallback heuristic for kwarg-style strings like 'search_term="SFT-HD"'
+        val = re.sub(
+            r'^.*?search_term\s*=\s*["\'](.*)["\'].*$', r"\1", args_str
+        ).strip()
+        if val == args_str:
+            val = args_str.replace('"', "").replace("'", "").strip()
+        args = {"search_term": val}
+
+    # If propose_state_change args failed to parse, return empty dict
+    # so the tool returns a helpful error instead of crashing.
+    if tool_name == "propose_state_change" and not isinstance(args, dict):
+        args = {}
+
+    return (tool_name, args)
 
 
 # ---------------------------------------------------------------------------
@@ -161,7 +253,7 @@ def get_dataset_schema() -> str:
         A multi-line plain-text schema summary listing:
         - The primary key column name.
         - All columns with their data types.
-        - All detected constraint pairs (mutable_column → limit_column).
+        - All detected constraint pairs (mutable_column -> limit_column).
         - Any unconstrained numeric columns.
 
     Example agent usage:
@@ -172,10 +264,45 @@ def get_dataset_schema() -> str:
     """
     try:
         dm = get_data_manager()
-        df = dm.get_inventory()
-        inferencer = DynamicSchemaInferencer(df)
-        profile = inferencer.infer()
+        profile = dm.get_schema_profile()
         summary = profile.as_agent_summary()
+
+        # Append sample data so agents know what values exist to search for
+        df = dm.get_inventory()
+        pk = profile.primary_key_column
+        extra_lines: list[str] = []
+
+        # Primary key values (all if ≤60, else first 50)
+        if pk in df.columns:
+            pk_values = df[pk].dropna().unique().tolist()
+            if len(pk_values) > 60:
+                pk_values = pk_values[:50]
+            extra_lines += [
+                "",
+                f"PRIMARY KEY VALUES ({len(pk_values)} shown):",
+            ]
+            extra_lines.append("  " + ", ".join(str(v) for v in pk_values))
+
+        # Sample unique values for categorical (object) columns
+        cat_cols = [
+            c for c in df.select_dtypes(include=["object"]).columns
+            if c != pk
+        ]
+        if cat_cols:
+            extra_lines += ["", "CATEGORICAL COLUMN SAMPLES:"]
+            for col in cat_cols:
+                uniques = df[col].dropna().unique().tolist()
+                shown = uniques[:15]
+                extra_lines.append(
+                    f"  • {col}: {', '.join(str(v) for v in shown)}"
+                    + (f" … (+{len(uniques) - 15} more)" if len(uniques) > 15 else "")
+                )
+
+        # A few sample rows for context
+        sample = df.head(3).to_string(index=False)
+        extra_lines += ["", "SAMPLE ROWS (first 3):", sample]
+
+        summary += "\n".join(extra_lines)
         logger.info("get_dataset_schema called — returning %d-char summary.", len(summary))
         return summary
     except Exception as exc:  # noqa: BLE001
@@ -190,54 +317,67 @@ def get_dataset_schema() -> str:
 
 @tool
 def query_data(search_term: str) -> str:
-    """Look up one or more rows in the dataset by their primary key value.
+    """Search the dataset for rows matching a keyword across all text columns.
 
-    Use this tool AFTER calling ``get_dataset_schema`` so you know which
-    column is the Primary Key and what the valid key values look like.
+    Use this tool AFTER calling ``get_dataset_schema`` so you know the column
+    names and primary key values.
 
     Call this tool to inspect the CURRENT state of a row before proposing
     any changes — you need to know the live ``current_stock`` (or equivalent
     column) to calculate a meaningful delta.
 
-    If you are unsure of the exact primary key value, you may pass a
-    *partial* search term (e.g., ``"PLASTIC"`` will match ``"ITEM-PLASTIC-01"``).
-    All matching rows are returned.
+    The search is case-insensitive and matches partial substrings across
+    ALL string/object columns (not just the primary key). For example,
+    searching ``"brake"`` will match a row where *any* text column contains
+    ``"brake"`` — whether that's the primary key, a description, or a category.
 
     Args:
-        search_term: The primary key value (exact or partial substring) to
-            search for.  Case-insensitive.  For example: ``"ITEM-PLASTIC-01"``
-            or just ``"PLASTIC"``.
+        search_term: A keyword or partial value to search for.
+            Case-insensitive.  Examples: ``"AUTO-BRK-PAD-F"``, ``"brake"``,
+            ``"COLD"``, ``"Insulin"``.
 
     Returns:
         A JSON-formatted string representing the matched rows (list of dicts).
         Each dict contains all column values for that row.  If no rows match,
-        returns a descriptive message telling you what primary key values ARE
-        available so you can correct your search term.
+        returns a descriptive message listing available primary key values.
 
     Example agent usage:
-        Agent calls: ``query_data("PLASTIC")``
-        Returns: ``[{"item_id": "ITEM-PLASTIC-01", "current_stock": 8500, ...}]``
+        Agent calls: ``query_data("brake")``
+        Returns: ``[{"part_number": "AUTO-BRK-PAD-F", "description": "Front Brake Pad Set", ...}]``
     """
     try:
         dm = get_data_manager()
         df = dm.get_inventory()
+        pk_col = dm.get_schema_profile().primary_key_column
 
-        # Detect the primary key column dynamically
-        inferencer = DynamicSchemaInferencer(df)
-        profile = inferencer.infer()
-        pk_col = profile.primary_key_column
+        # Search across all string/object columns for broader matching
+        str_cols = df.select_dtypes(include=["object"]).columns
 
-        # Case-insensitive partial substring match
-        mask = df[pk_col].astype(str).str.contains(
-            search_term, case=False, na=False, regex=False
-        )
+        def _search(term: str) -> pd.Series:
+            m = pd.Series(False, index=df.index)
+            for col in str_cols:
+                m = m | df[col].astype(str).str.contains(
+                    term, case=False, na=False, regex=False
+                )
+            return m
+
+        mask = _search(search_term)
+
+        # Fallback: if full phrase has no matches, try individual words
+        if not mask.any():
+            words = search_term.split()
+            if len(words) > 1:
+                for word in words:
+                    if len(word) >= 3:  # skip very short words
+                        mask = mask | _search(word)
+
         matched_df = df[mask]
 
         if matched_df.empty:
             available = df[pk_col].tolist()
             return (
                 f"QUERY RESULT — No Matches: "
-                f"No rows found where '{pk_col}' contains '{search_term}'. "
+                f"No rows found containing '{search_term}' in any text column. "
                 f"Available primary key values are: {available}"
             )
 
@@ -256,8 +396,6 @@ def query_data(search_term: str) -> str:
 # ---------------------------------------------------------------------------
 # Tool 3 — Propose State Change (Sandbox-Gated)
 # ---------------------------------------------------------------------------
-
-from langchain_core.runnables import RunnableConfig
 
 @tool
 def propose_state_change(
@@ -279,11 +417,12 @@ def propose_state_change(
        capacity, or goes below zero), the proposal is **REJECTED** and the
        exact mathematical failure reason is returned to you.  You must revise
        your plan and try again.
-    3. **Live Commit** — Only if the Sandbox returns ``SAFE``, the change is
-       applied to the live Master Clipboard via ``FactoryDataManager.update_inventory``.
-    4. **Audit Logging** — The decision is recorded in the transaction ledger
-       (``transaction_log.csv``) with your agent ID, financial impact, and
-       sandbox approval status for the Analyst's Retrospective Weighting.
+    3. **Stage for HITL Approval** — Only if the Sandbox returns ``SAFE``,
+       the change is STAGED (not yet committed). The human operator must
+       click "Approve & Execute" in the UI to commit it to the Master Clipboard.
+    4. **Audit Logging** — Rejections are recorded in the transaction ledger
+       (``transaction_log.csv``) with your agent ID and sandbox rejection
+       status for the Analyst's Retrospective Weighting.
 
     IMPORTANT RULES:
     - You MUST call ``get_dataset_schema`` first so you know the correct
@@ -310,17 +449,18 @@ def propose_state_change(
             during port strike delay."``
 
     Returns:
-        On **SAFE**: A JSON string summarising the committed change::
+        On **SAFE**: A JSON string summarising the staged change::
 
             {
-                "status": "COMMITTED",
+                "status": "STAGED",
                 "row_key": "ITEM-PLASTIC-01",
                 "column": "current_stock",
                 "old_value": 8500.0,
                 "new_value": 8000.0,
                 "delta": -500.0,
                 "limit_value": 15000.0,
-                "justification": "..."
+                "justification": "...",
+                "note": "Change validated by Sandbox. Awaiting human approval before commit."
             }
 
         On **REJECTED**: A plain-text rejection string from the Sandbox
@@ -331,13 +471,13 @@ def propose_state_change(
     Example agent usage:
         # After schema + query checks:
         Agent calls: ``propose_state_change("ITEM-PLASTIC-01", "current_stock", -500, "Emergency buffer reduction")``
-        Returns: ``{"status": "COMMITTED", ...}``
+        Returns: ``{"status": "STAGED", ...}``
     """
     try:
         dm = get_data_manager()
         live_df = dm.get_inventory()
 
-        # ── Stage 1: Column validation ─────────────────────────────────────
+        # -- Stage 1: Column validation -----------------------------------
         if target_column not in live_df.columns:
             available = live_df.columns.tolist()
             return (
@@ -347,7 +487,6 @@ def propose_state_change(
                 f"Available columns: {available}"
             )
 
-        import pandas as pd
         if not pd.api.types.is_numeric_dtype(live_df[target_column]):
             return (
                 f"PROPOSAL REJECTED — Non-Numeric Column: "
@@ -355,7 +494,7 @@ def propose_state_change(
                 f"modified by an agent. Choose a numeric column."
             )
 
-        # ── Stage 2: Shadow Sandbox evaluation ────────────────────────────
+        # -- Stage 2: Shadow Sandbox evaluation ---------------------------
         sandbox = ShadowSandbox(live_df)
         result: SandboxResult = sandbox.evaluate_proposal(
             row_primary_key=row_key,
@@ -386,7 +525,7 @@ def propose_state_change(
             )
             return result.rejection_reason  # type: ignore[return-value]
 
-        # ── Stage 3: STAGE for HITL approval (do NOT commit yet) ──────────
+        # -- Stage 3: STAGE for HITL approval (do NOT commit yet) ----------
         financial_impact = _estimate_financial_impact(live_df, row_key, delta)
 
         staged_change = {
@@ -400,7 +539,7 @@ def propose_state_change(
             "financial_impact": financial_impact,
             "agent_id": _infer_calling_agent(config),
         }
-        pending_changes.append(staged_change)
+        dm.pending_changes.append(staged_change)
 
         staged_response: dict[str, Any] = {
             "status": "STAGED",
@@ -437,30 +576,35 @@ def propose_state_change(
 @tool
 def ask_other_agent(target_agent: str, question: str, config: RunnableConfig) -> str:
     """Ask a question to another specialist agent (Maker, Mover, Keeper).
-    
-    Use this tool when your proposed action crosses domain boundaries and you 
+
+    Use this tool when your proposed action crosses domain boundaries and you
     need permission or insight from the agent responsible for that domain.
     For example:
-    - If you are the Keeper and want to increase stock, you MUST ask the Maker 
+    - If you are the Keeper and want to increase stock, you MUST ask the Maker
       if production can be increased.
     - If you are the Maker and want to increase production, you MUST ask the Keeper
       if there is warehouse capacity.
-      
+
     Args:
         target_agent: The name of the agent to consult ('Maker', 'Mover', 'Keeper').
         question: The specific question, including context about your planned action.
-        
+
     Returns:
         The text response from the consulted agent.
     """
     try:
         from langchain_groq import ChatGroq
-        from langchain_core.messages import SystemMessage, HumanMessage
-        import src.core.config as sys_config
+        from langchain_core.messages import (
+            AIMessage,
+            HumanMessage,
+            SystemMessage,
+            ToolMessage,
+        )
+        import os
         import src.agents.prompts as prompts
-        
+
         target_clean = target_agent.lower().strip()
-        
+
         # Select the correct prompt
         if target_clean == "maker":
             sys_prompt = prompts.MAKER_SYSTEM_PROMPT
@@ -480,20 +624,18 @@ def ask_other_agent(target_agent: str, question: str, config: RunnableConfig) ->
             "Your ONLY goal is to evaluate the question, use query_data if needed, and reply with text."
         )
 
-        import os
-        
         # Instantiate a temporary LLM for the sub-agent
         llm = ChatGroq(
             api_key=os.environ.get("GROQ_API_KEY"),
-            model="llama-3.1-8b-instant", # Fast, capable model for quick internal routing
+            model="llama-3.1-8b-instant",
             temperature=0.1,
             max_retries=2,
         )
-        
+
         # Bind lookup tools only (don't let sub-agents propose state changes themselves)
         sub_tools = [get_dataset_schema, query_data]
         llm_with_tools = llm.bind_tools(sub_tools)
-        
+
         caller_id = _infer_calling_agent(config)
         prompt_context = (
             f"You are being consulted by the {caller_id.upper()} agent.\n"
@@ -501,75 +643,66 @@ def ask_other_agent(target_agent: str, question: str, config: RunnableConfig) ->
             f"Use your lookup tools to check the current state if necessary, "
             f"then provide a clear 'Yes' or 'No' recommendation with brief justification."
         )
-        
+
         logger.info("Agent '%s' is asking '%s': %s", caller_id, target_clean, question)
-        
+
         # Run a short ReAct loop for the sub-agent
-        from langchain_core.messages import AIMessage, ToolMessage
-        messages = [SystemMessage(content=sys_prompt), HumanMessage(content=prompt_context)]
+        messages: list[Any] = [
+            SystemMessage(content=sys_prompt),
+            HumanMessage(content=prompt_context),
+        ]
         final_answer = ""
         tool_map = {t.name: t for t in sub_tools}
-        
-        import re
-        import json
-        
+
         for _ in range(5):
             try:
                 ai_msg = llm_with_tools.invoke(messages)
             except Exception as e:
-                err_str = str(e)
-                # Catch the Groq XML `<function=...>` bug in the 400 error message
-                match = re.search(r"<function=(\w+)[^>]*>(.*?)</function>|<function=(\w+)(.*?)</function>", err_str)
-                if match:
-                    t_name = match.group(1) or match.group(3)
-                    t_args_str = match.group(2) or match.group(4)
-                    
-                    try:
-                        t_args = json.loads(t_args_str)
-                    except:
-                        # Fallback heuristic for arg string like 'search_term="SFT-HD"'
-                        val = re.sub(r'^.*?search_term\s*=\s*["\'](.*)["\'].*$', r'\1', t_args_str).strip()
-                        if val == t_args_str:
-                            val = t_args_str.replace('"', '').replace("'", "").strip()
-                        t_args = {"search_term": val}
-                        
+                parsed = parse_groq_xml_tool_call(str(e))
+                if parsed:
+                    t_name, t_args = parsed
                     if t_name in tool_map:
                         try:
-                            res = tool_map[t_name].invoke(input=t_args, config={"configurable": {"agent_id": f"sub_{target_clean}"}})
+                            res = tool_map[t_name].invoke(
+                                input=t_args,
+                                config={"configurable": {"agent_id": f"sub_{target_clean}"}},
+                            )
                         except Exception as tool_exc:
                             res = str(tool_exc)
                     else:
                         res = f"Unknown tool: {t_name}"
-                        
-                    # Inject a mock AI tool call and the Tool message so the agent sees the result
+
                     mock_tool_call = {"name": t_name, "args": t_args, "id": f"call_{len(messages)}"}
                     messages.append(AIMessage(content="", tool_calls=[mock_tool_call]))
                     messages.append(ToolMessage(content=str(res), tool_call_id=mock_tool_call["id"], name=t_name))
                     continue
                 else:
                     return f"Sub-agent failed (API Error): {e}"
-            
+
             messages.append(ai_msg)
-            
+
             if not ai_msg.tool_calls:
                 final_answer = str(ai_msg.content)
                 break
-                
+
             for tc in ai_msg.tool_calls:
                 t_name = tc["name"]
                 t_args = tc["args"]
                 if t_name in tool_map:
                     try:
-                        res = tool_map[t_name].invoke(input=t_args, config={"configurable": {"agent_id": f"sub_{target_clean}"}})
+                        res = tool_map[t_name].invoke(
+                            input=t_args,
+                            config={"configurable": {"agent_id": f"sub_{target_clean}"}},
+                        )
                     except Exception as e:
                         res = str(e)
                 else:
                     res = f"Unknown tool: {t_name}"
                 messages.append(ToolMessage(content=str(res), tool_call_id=tc["id"], name=t_name))
-                
+
         return final_answer or "Sub-agent failed to respond."
-        
-    except Exception as exc: # noqa: BLE001
+
+    except Exception as exc:  # noqa: BLE001
         logger.error("ask_other_agent failed: %s", exc, exc_info=True)
         return f"TOOL ERROR — ask_other_agent failed: {exc}"
 
@@ -596,20 +729,20 @@ def _estimate_financial_impact(
     Returns:
         Estimated USD financial impact (negative = cost, positive = revenue/saving).
     """
-    import re as _re
-    cost_pattern = _re.compile(r"(unit.?cost|cost.?per.?unit|price|unit.?price)", _re.IGNORECASE)
+    # Match cost-like columns but NOT retail/sale price columns
+    cost_pattern = re.compile(
+        r"(unit.?cost|cost.?per.?unit|unit.?price|cost.?price|wholesale.?price)",
+        re.IGNORECASE,
+    )
     cost_col = next(
         (col for col in df.columns if cost_pattern.search(col)), None
     )
     if cost_col is None:
         return 0.0
 
-    # Infer primary key column (reuse inferencer but avoid circular cost)
     try:
-        from src.core.schema_engine import DynamicSchemaInferencer
-        inferencer = DynamicSchemaInferencer(df)
-        profile = inferencer.infer()
-        pk_col = profile.primary_key_column
+        dm = get_data_manager()
+        pk_col = dm.get_schema_profile().primary_key_column
         mask = df[pk_col].astype(str) == str(row_key)
         if mask.any():
             unit_cost = float(df.loc[mask, cost_col].iloc[0])
@@ -642,4 +775,10 @@ SENTINEL_TOOLS: list = [
     query_data,
     propose_state_change,
     ask_other_agent,
+]
+
+#: Read-only tools for informational queries — no state mutation allowed.
+INFO_TOOLS: list = [
+    get_dataset_schema,
+    query_data,
 ]

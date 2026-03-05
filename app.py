@@ -23,6 +23,7 @@ Architecture notes:
 
 from __future__ import annotations
 
+import html
 import json
 import logging
 import os
@@ -56,9 +57,9 @@ from src.core.state_manager import FactoryDataManager
 from src.tools.tool_registry import (
     SENTINEL_TOOLS,
     get_data_manager,
+    set_data_manager,
     commit_pending_changes,
     discard_pending_changes,
-    pending_changes as tool_pending_changes,
 )
 
 # ---------------------------------------------------------------------------
@@ -221,9 +222,12 @@ def _init_session_state() -> None:
     lazily on first use so that a missing API key does not crash the app
     before the user can even see the UI.
     """
+    if "active_workspace" not in ss:
+        ss.active_workspace = config.DEFAULT_WORKSPACE
+
     if "manager" not in ss:
-        ss.manager = FactoryDataManager()
-        logger.info("FactoryDataManager created and stored in session_state.")
+        ss.manager = FactoryDataManager(workspace=ss.active_workspace)
+        logger.info("FactoryDataManager created for workspace '%s'.", ss.active_workspace)
 
     if "orchestrator" not in ss:
         ss.orchestrator = None   # Lazy — built on first crisis trigger
@@ -291,15 +295,23 @@ def _get_or_create_orchestrator() -> AgentOrchestrator | None:
 
 _init_session_state()
 
+# Ensure tools always operate on the same per-session FactoryDataManager
+# instance that the UI and orchestrator use.  This is called on every
+# Streamlit rerun so that the module-level reference in tool_registry
+# stays in sync with st.session_state.manager.
+set_data_manager(ss.manager)
+
 
 # ---------------------------------------------------------------------------
 # Helper: reload FactoryDataManager after CSV upload
 # ---------------------------------------------------------------------------
 
-def _reload_data_manager() -> None:
-    """Rebuild the FactoryDataManager singleton after the backing CSV changes."""
-    get_data_manager.cache_clear()
-    ss.manager = FactoryDataManager()
+def _reload_data_manager(workspace: str | None = None) -> None:
+    """Rebuild the FactoryDataManager for a (possibly new) workspace."""
+    ws = workspace or ss.active_workspace
+    ss.active_workspace = ws
+    ss.manager = FactoryDataManager(workspace=ws)
+    set_data_manager(ss.manager)  # Sync tools to the new instance
     ss.orchestrator = None   # Will be rebuilt lazily with the new manager
     ss.chat_history = []
     ss.agent_steps = []
@@ -307,8 +319,9 @@ def _reload_data_manager() -> None:
     ss.pending_route = None
     ss.pending_crisis = None
     ss.schema_profile_summary = None
+    ss.schema_profile = None
     ss.suggested_crises = []
-    logger.info("Data manager reloaded after CSV upload.")
+    logger.info("Data manager reloaded for workspace '%s'.", ws)
 
 
 # ---------------------------------------------------------------------------
@@ -349,11 +362,53 @@ def _render_sidebar() -> CrisisEvent | None:
         st.markdown("## 🏭 Sentinel Control Panel")
         st.divider()
 
-        # ── CSV Ingestion Engine ──────────────────────────────────────────
-        st.markdown("### 📅 Weekly / Monthly Data Upload")
-        st.caption(
-            "Upload your latest inventory CSV here. The new data will overwrite the Master Clipboard, "
-            "and all agents will immediately use this new data for subsequent queries and operations."
+        # ── Workspace Management ───────────────────────────────────────────
+        st.markdown("### 📂 Workspaces")
+
+        # Show active workspace with metadata
+        meta = FactoryDataManager.get_workspace_metadata(ss.active_workspace)
+        if meta:
+            updated = meta.get("last_updated", "")[:10]  # date portion
+            updates = meta.get("update_count", 0)
+            txns = meta.get("transaction_count", 0)
+            st.info(
+                f"**{ss.active_workspace}**  \n"
+                f"{meta.get('row_count', '?')} rows · "
+                f"Updated {updated} · "
+                f"{updates} upload(s) · "
+                f"{txns} transactions"
+            )
+        else:
+            st.info(f"Active: **{ss.active_workspace}**")
+
+        # Switch workspace
+        existing_ws = FactoryDataManager.list_workspaces()
+        if existing_ws:
+            switch_ws = st.selectbox(
+                "Switch workspace",
+                options=existing_ws,
+                index=existing_ws.index(ss.active_workspace) if ss.active_workspace in existing_ws else 0,
+                key="ws_selector",
+            )
+            if switch_ws != ss.active_workspace:
+                _reload_data_manager(workspace=switch_ws)
+                profile = DynamicSchemaInferencer(ss.manager.get_inventory()).infer()
+                ss.schema_profile_summary = profile.as_agent_summary()
+                ss.schema_profile = profile
+                st.rerun()
+
+        # Upload mode selector
+        upload_mode = st.radio(
+            "Upload mode",
+            options=["New workspace", "Update current workspace"],
+            index=0,
+            key="upload_mode",
+            horizontal=True,
+            help=(
+                "**New workspace**: Creates a fresh workspace with empty history.  \n"
+                "**Update current**: Replaces inventory data but keeps transaction "
+                "log and trust scores — ideal for weekly/monthly data refreshes."
+            ),
         )
 
         uploaded_file = st.file_uploader(
@@ -363,24 +418,48 @@ def _render_sidebar() -> CrisisEvent | None:
             help="Columns can have any names — the schema engine infers the rules automatically.",
         )
         if uploaded_file is not None:
-            # Guard: only reload if this is a genuinely NEW file upload.
-            # Without this, every st.rerun() re-processes the same file and
-            # wipes ss.agent_steps, causing crisis results to vanish.
             last_uploaded = ss.get("_last_uploaded_csv_name", "")
             if uploaded_file.name != last_uploaded:
                 try:
                     new_df = pd.read_csv(uploaded_file)
-                    config.INVENTORY_CSV.parent.mkdir(parents=True, exist_ok=True)
-                    new_df.to_csv(config.INVENTORY_CSV, index=False)
-                    _reload_data_manager()
+
+                    if upload_mode == "New workspace":
+                        # Derive workspace name from filename
+                        ws_name = Path(uploaded_file.name).stem
+                        ws_name = re.sub(r"[^\w\-]", "_", ws_name).strip("_") or "uploaded"
+
+                        _reload_data_manager(workspace=ws_name)
+                        new_df.to_csv(ss.manager.workspace_dir / "inventory.csv", index=False)
+                        _reload_data_manager(workspace=ws_name)
+                        ss.manager.save_metadata(original_filename=uploaded_file.name)
+                        msg = f"Workspace **{ws_name}** created — {len(new_df)} rows loaded."
+
+                    else:
+                        # Update current workspace — preserve history
+                        ss.manager.update_inventory_data(new_df)
+                        ss.manager.save_metadata(original_filename=uploaded_file.name)
+                        # Clear UI state but keep trust scores & transaction log
+                        ss.orchestrator = None
+                        ss.agent_steps = []
+                        ss.chat_history = []
+                        ss.pending_proposal = None
+                        ss.pending_route = None
+                        ss.pending_crisis = None
+                        ss.suggested_crises = []
+                        msg = (
+                            f"Workspace **{ss.active_workspace}** updated — "
+                            f"{len(new_df)} rows loaded. "
+                            f"Transaction log and trust scores preserved."
+                        )
+
                     profile = DynamicSchemaInferencer(new_df).infer()
                     ss.schema_profile_summary = profile.as_agent_summary()
                     ss.schema_profile = profile
                     ss["_last_uploaded_csv_name"] = uploaded_file.name
-                    st.success(f"✅ Loaded **{uploaded_file.name}** — {len(new_df)} rows detected.")
-                    
+                    st.success(f"✅ {msg}")
+
                     # Auto-scan the newly loaded data
-                    with st.spinner("Maker, Mover, and Keeper are analyzing new data for risks..."):
+                    with st.spinner("Agents are analyzing data for risks..."):
                         orch = _get_or_create_orchestrator()
                         if orch:
                             ss.suggested_crises = orch.scan_for_crises()
@@ -388,6 +467,20 @@ def _render_sidebar() -> CrisisEvent | None:
                     st.error(f"❌ Failed to load CSV: {exc}")
             else:
                 st.success(f"✅ Using **{uploaded_file.name}**")
+
+        # Delete workspace
+        if existing_ws and len(existing_ws) > 1:
+            st.markdown("---")
+            del_ws = st.selectbox(
+                "Delete workspace",
+                options=[w for w in existing_ws if w != ss.active_workspace],
+                key="ws_delete_selector",
+                help="Cannot delete the currently active workspace.",
+            )
+            if st.button("🗑️ Delete", key="ws_delete_btn", type="secondary"):
+                FactoryDataManager.delete_workspace(del_ws)
+                st.success(f"Workspace **{del_ws}** deleted.")
+                st.rerun()
 
         st.divider()
 
@@ -542,7 +635,7 @@ def _render_data_tab() -> None:
     # Identify dynamic columns from inferred constraint pairs
     mutable_col = None
     limit_col = None
-    pk_col = profile.primary_key if profile else None
+    pk_col = profile.primary_key_column if profile else None
     if profile and profile.constraint_rules:
         mutable_col = profile.constraint_rules[0].mutable_column
         limit_col = profile.constraint_rules[0].limit_column
@@ -644,19 +737,20 @@ def _render_chat_bubble(step: dict[str, Any]) -> None:
         st.markdown(
             f'<div class="{css_class}">'
             f'{icon} <strong>Dispatcher Routing</strong> → '
-            f'<code>{route.selected_agent.upper()}</code> '
-            f'[{route.urgency_tier}]<br>'
-            f'<em>{route.delegation_justification}</em>'
+            f'<code>{html.escape(route.selected_agent.upper())}</code> '
+            f'[{html.escape(route.urgency_tier)}]<br>'
+            f'<em>{html.escape(route.delegation_justification)}</em>'
             f'{override_text}'
             f'</div>',
             unsafe_allow_html=True,
         )
 
     elif step_type == "tool_call":
-        tool_name = step.get("tool", "tool")
+        tool_name = html.escape(str(step.get("tool", "tool")))
+        safe_content = html.escape(content[:200])
         st.markdown(
             f'<div class="msg-tool">🔧 <strong>{tool_name}</strong>('
-            f'{content[:200]}{"..." if len(content) > 200 else ""})</div>',
+            f'{safe_content}{"..." if len(content) > 200 else ""})</div>',
             unsafe_allow_html=True,
         )
 
@@ -681,7 +775,7 @@ def _render_chat_bubble(step: dict[str, Any]) -> None:
                 st.markdown(pre.strip())
             proposal_full = "--- MITIGATION PROPOSAL ---" + proposal_block
             st.markdown(
-                f'<div class="msg-safe">{proposal_full.replace(chr(10), "<br>")}</div>',
+                f'<div class="msg-safe">{html.escape(proposal_full).replace(chr(10), "<br>")}</div>',
                 unsafe_allow_html=True,
             )
         else:
@@ -690,19 +784,19 @@ def _render_chat_bubble(step: dict[str, Any]) -> None:
     elif step_type == "analyst_verdict":
         st.markdown("### 📊 Analyst Verdict")
         st.markdown(
-            f'<div class="msg-system">{content.replace(chr(10), "<br>")}</div>',
+            f'<div class="msg-system">{html.escape(content).replace(chr(10), "<br>")}</div>',
             unsafe_allow_html=True,
         )
 
     elif step_type == "human":
         st.markdown(
-            f'<div class="msg-human">👤 <strong>Human Operator</strong><br>{content}</div>',
+            f'<div class="msg-human">👤 <strong>Human Operator</strong><br>{html.escape(content)}</div>',
             unsafe_allow_html=True,
         )
 
     elif step_type == "system":
         st.markdown(
-            f'<div class="msg-system">⚙️ {content}</div>',
+            f'<div class="msg-system">⚙️ {html.escape(content)}</div>',
             unsafe_allow_html=True,
         )
 
@@ -714,45 +808,47 @@ def _render_crisis_console(trigger_crisis: CrisisEvent | None) -> None:
     """Render the Crisis Console tab with chat UI and Human-in-the-Loop controls."""
     st.markdown("## 🚨 Crisis Console")
 
+    # Safety: reset stuck crisis_running flag (e.g. after Streamlit script kill)
+    if ss.get("crisis_running") and ss.get("_crisis_start_time"):
+        import time
+        if time.time() - ss._crisis_start_time > 120:  # 2-minute timeout
+            ss.crisis_running = False
+            logger.warning("Reset stuck crisis_running flag after timeout.")
+
     # ── If a new crisis was triggered ────────────────────────────────────
     if trigger_crisis is not None and not ss.crisis_running:
+        import time as _time
         ss.crisis_running = True
+        ss._crisis_start_time = _time.time()
         crisis = trigger_crisis
 
-        st.markdown(
-            f'<div class="msg-system">🚨 <strong>CRISIS INCOMING:</strong> '
-            f'[{crisis.event_id}] — {crisis.description[:200]}</div>',
-            unsafe_allow_html=True,
-        )
+        try:
+            st.markdown(
+                f'<div class="msg-system">🚨 <strong>CRISIS INCOMING:</strong> '
+                f'[{crisis.event_id}] — {crisis.description[:200]}</div>',
+                unsafe_allow_html=True,
+            )
 
-        # Step 1: Dispatch
-        with st.spinner("🔀 Dispatcher routing crisis to specialist agent..."):
-            try:
+            # Step 1: Dispatch
+            with st.spinner("🔀 Dispatcher routing crisis to specialist agent..."):
                 orch = _get_or_create_orchestrator()
                 if orch is None:
                     st.error("⚠️ Orchestrator not ready. Check GROQ_API_KEY in .env.")
-                    ss.crisis_running = False
                     return
                 route: DispatchRoute = orch.dispatch(crisis=crisis)
                 ss.pending_route = route
                 ss.pending_crisis = crisis
                 ss.agent_steps.append({"type": "dispatch", "route": route})
-            except RuntimeError as exc:
-                st.error(f"Dispatcher failed: {exc}")
-                ss.crisis_running = False
-                return
 
-        # Step 2: Run specialist with streaming steps
-        st.markdown(
-            f"**Routing to: `{route.selected_agent.upper()}`** — collecting data and "
-            f"formulating mitigation plan..."
-        )
+            # Step 2: Run specialist with streaming steps
+            st.markdown(
+                f"**Routing to: `{route.selected_agent.upper()}`** — collecting data and "
+                f"formulating mitigation plan..."
+            )
 
-        from langchain_core.messages import HumanMessage as HM
-        progress_placeholder = st.empty()
+            progress_placeholder = st.empty()
 
-        with st.spinner(f"🤖 {route.selected_agent.capitalize()} agent working..."):
-            try:
+            with st.spinner(f"🤖 {route.selected_agent.capitalize()} agent working..."):
                 for step in orch.run_specialist(
                     route=route,
                     crisis=crisis,
@@ -765,10 +861,15 @@ def _render_crisis_console(trigger_crisis: CrisisEvent | None) -> None:
                         ss.chat_history.append(HM(content=crisis.description))
                         ss.chat_history.append(AI(content=step["content"]))
                     progress_placeholder.empty()
-            except Exception as exc:
-                st.error(f"Specialist agent failed: {exc}")
 
-        ss.crisis_running = False
+        except RuntimeError as exc:
+            ss.agent_steps.append({"type": "error", "content": f"Dispatcher failed: {exc}"})
+        except Exception as exc:
+            ss.agent_steps.append({"type": "error", "content": f"Crisis handling failed: {exc}"})
+            logger.error("Crisis handling failed: %s", exc, exc_info=True)
+        finally:
+            ss.crisis_running = False
+
         st.rerun()
 
     # ── Render all accumulated steps ─────────────────────────────────────
@@ -802,7 +903,7 @@ def _render_crisis_console(trigger_crisis: CrisisEvent | None) -> None:
                 st.markdown(f"- {action_line}")
 
         # Show count of staged changes
-        staged_count = len(tool_pending_changes)
+        staged_count = len(ss.manager.pending_changes)
         if staged_count > 0:
             st.info(f"📦 **{staged_count} state change(s)** validated by the Sandbox and staged for your approval.")
 
@@ -824,7 +925,18 @@ def _render_crisis_console(trigger_crisis: CrisisEvent | None) -> None:
 
     # ── Custom chat input ─────────────────────────────────────────────────
     st.divider()
-    st.markdown("#### 💬 Direct Agent Query")
+    col_title, col_clear = st.columns([4, 1])
+    with col_title:
+        st.markdown("#### 💬 Direct Agent Query")
+    with col_clear:
+        if st.button("🔄 Clear", key="clear_history_btn", help="Clear chat history and agent steps"):
+            ss.chat_history = []
+            ss.agent_steps = []
+            ss.pending_proposal = None
+            ss.pending_route = None
+            ss.pending_crisis = None
+            st.rerun()
+
     user_query = st.chat_input(
         placeholder="Ask a question about the inventory or request an action...",
         key="direct_query",
@@ -882,8 +994,57 @@ def _handle_approval(proposal_text: str) -> None:
     st.rerun()
 
 
+def _is_action_query(query: str) -> bool:
+    """Return True if the query implies a crisis or action that mutates state.
+
+    Informational queries (show, list, what, how many, details, etc.) return
+    False so they go through the read-only info path instead of the Dispatcher.
+    """
+    lower = query.lower().strip()
+
+    # Strong informational signals → always informational
+    info_patterns = (
+        "show", "list", "display", "what is", "what are", "how many",
+        "tell me", "give me", "details", "describe", "summary", "overview",
+        "which", "who", "where", "status", "check", "view", "get",
+        "print", "fetch", "report",
+    )
+    if any(lower.startswith(p) or p in lower for p in info_patterns):
+        # Only override if there are imperative action commands present.
+        # Phrases like "reorder point" are data concepts, not actions.
+        action_verbs = (
+            "quarantine", "reallocate", "increase", "reduce",
+            "transfer", "rush", "halt", "shut down",
+            "replenish", "expedite", "divert", "reroute",
+        )
+        # "reorder" is only an action when NOT followed by "point"/"level"
+        has_reorder_action = "reorder" in lower and not re.search(r"reorder\s*(point|level|threshold)", lower)
+        # "recall" is only an action when NOT preceded by "about"/"regarding"
+        has_recall_action = "recall" in lower and not re.search(r"(about|regarding|of)\s+.*recall", lower)
+        # "ship" is only action when NOT part of "shipment"
+        has_ship_action = "ship" in lower and "shipment" not in lower and not re.search(r"ship(ping|ped|s)", lower)
+        # "move" is only action when NOT part of "movement"
+        has_move_action = "move" in lower and "movement" not in lower
+
+        explicit_actions = any(v in lower for v in action_verbs)
+        if not (explicit_actions or has_reorder_action or has_recall_action or has_ship_action or has_move_action):
+            return False
+
+    # Crisis / action signals
+    action_keywords = (
+        "crisis", "emergency", "failure", "failed", "broke", "broken",
+        "recall", "strike", "disrupted", "disruption", "shortage",
+        "stockout", "overflow", "spike", "surge", "halted", "spoil",
+        "quarantine", "reorder", "reallocate", "increase production",
+        "reduce stock", "transfer", "ship", "rush", "urgent",
+        "expedite", "divert", "reroute", "replenish", "expired",
+        "defect", "contaminated", "damaged",
+    )
+    return any(kw in lower for kw in action_keywords)
+
+
 def _handle_direct_query(query: str) -> None:
-    """Route a direct user query through the Dispatcher and specialist."""
+    """Route a direct user query — informational or action-oriented."""
     from langchain_core.messages import AIMessage as AI, HumanMessage as HM
 
     orch = _get_or_create_orchestrator()
@@ -892,32 +1053,51 @@ def _handle_direct_query(query: str) -> None:
         st.rerun()
         return
 
-    synthetic_crisis = CrisisEvent(
-        event_id="EVT-DIRECT-QUERY",
-        event_type="OPERATOR_QUERY",
-        severity="LOW",
-        description=query,
-        affected_entities={},
-    )
-
     ss.agent_steps.append({"type": "human", "content": query})
 
-    with st.spinner("Routing and processing query..."):
-        try:
-            route = orch.dispatch(crisis=synthetic_crisis)
-            ss.agent_steps.append({"type": "dispatch", "route": route})
+    if _is_action_query(query):
+        # Action/crisis query → full Dispatcher + specialist pipeline
+        synthetic_crisis = CrisisEvent(
+            event_id="EVT-DIRECT-QUERY",
+            event_type="OPERATOR_QUERY",
+            severity="LOW",
+            description=query,
+            affected_entities={},
+        )
 
-            for step in orch.run_specialist(
-                route=route,
-                crisis=synthetic_crisis,
-                chat_history=ss.chat_history,
-            ):
-                ss.agent_steps.append(step)
-                if step["type"] == "final_answer":
-                    ss.chat_history.append(HM(content=query))
-                    ss.chat_history.append(AI(content=step["content"]))
-        except Exception as exc:
-            ss.agent_steps.append({"type": "error", "content": str(exc)})
+        with st.spinner("Routing and processing query..."):
+            try:
+                route = orch.dispatch(crisis=synthetic_crisis)
+                ss.agent_steps.append({"type": "dispatch", "route": route})
+
+                for step in orch.run_specialist(
+                    route=route,
+                    crisis=synthetic_crisis,
+                    chat_history=ss.chat_history,
+                ):
+                    ss.agent_steps.append(step)
+                    if step["type"] == "final_answer":
+                        ss.pending_proposal = step["content"]
+                        ss.pending_route = route
+                        ss.pending_crisis = synthetic_crisis
+                        ss.chat_history.append(HM(content=query))
+                        ss.chat_history.append(AI(content=step["content"]))
+            except Exception as exc:
+                ss.agent_steps.append({"type": "error", "content": str(exc)})
+    else:
+        # Informational query → direct answer without crisis fabrication
+        with st.spinner("Looking up data..."):
+            try:
+                for step in orch.answer_query(
+                    query=query,
+                    chat_history=ss.chat_history,
+                ):
+                    ss.agent_steps.append(step)
+                    if step["type"] == "final_answer":
+                        ss.chat_history.append(HM(content=query))
+                        ss.chat_history.append(AI(content=step["content"]))
+            except Exception as exc:
+                ss.agent_steps.append({"type": "error", "content": str(exc)})
 
     st.rerun()
 

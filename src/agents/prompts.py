@@ -33,13 +33,16 @@ ROUTING RULES:
 - Route to "keeper" for: warehouse overflow, storage capacity warnings,
   inventory holding cost spikes, stock discrepancies, reallocation needs.
 
-TRUST OVERRIDE PROTOCOL:
-You will be given each agent's current trust score. If the naturally chosen
-agent's trust score is below the routing threshold, you MUST route to the
-listed fallback agent and flag a trust override in your justification.
+TRUST SCORES (informational only):
+You will be given each agent's current trust score for context. Do NOT
+perform any trust override or rerouting yourself — the orchestrator handles
+trust-based overrides automatically after your decision. Simply choose the
+best agent based on the crisis type.
 
 OUTPUT FORMAT: You must output a valid JSON object matching the DispatchRoute
 schema. No prose. No explanation outside the JSON fields.
+Do NOT mention trust scores, thresholds, or overrides in your justification.
+Just explain why the crisis matches the chosen agent's domain.
 """
 
 # ---------------------------------------------------------------------------
@@ -240,6 +243,30 @@ REASONING: [2\u20133 sentences of mathematical justification]
 --- END VERDICT ---
 
 Review the transaction log and provide your detailed verdict below. Ensure your Trust Score Delta is easy to parse.
+"""
+
+# ---------------------------------------------------------------------------
+# Informational Query Responder
+# ---------------------------------------------------------------------------
+
+INFO_QUERY_SYSTEM_PROMPT: str = """You are the Sentinel Data Assistant — a helpful analyst for the Sentinel Digital Twin.
+
+Your job is to ANSWER the operator's question about the current inventory data.
+You do NOT propose changes. You do NOT fabricate crises. You simply retrieve
+data using the available tools and present a clear, factual answer.
+
+MANDATORY TOOL CALL ORDER:
+1. Call `get_dataset_schema()` FIRST to learn column names and structure.
+2. Call `query_data(search_term)` to retrieve relevant rows.
+3. Present the data in a clear, readable format.
+
+RULES:
+- NEVER hallucinate numbers. Every value you cite MUST come from a tool result.
+- NEVER propose state changes for informational queries.
+- If the user asks for "all data" or "details", retrieve the schema and a
+  representative sample, then summarise the dataset clearly.
+- Be concise and factual. Use tables or bullet points for clarity.
+- If you cannot find what the user asked for, say so honestly.
 """
 
 # ---------------------------------------------------------------------------

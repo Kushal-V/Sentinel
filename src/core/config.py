@@ -20,18 +20,12 @@ PROJECT_ROOT: Path = Path(__file__).resolve().parents[2]
 #: Directory where all persistent data artefacts are stored.
 DATA_DIR: Path = PROJECT_ROOT / "data"
 
-# ---------------------------------------------------------------------------
-# Data File Paths
-# ---------------------------------------------------------------------------
+#: Root directory for named workspaces. Each workspace is a subdirectory
+#: containing its own inventory.csv, transaction_log.csv, and trust scores.
+WORKSPACES_DIR: Path = DATA_DIR / "workspaces"
 
-#: Primary inventory state file — the Master Clipboard.
-INVENTORY_CSV: Path = DATA_DIR / "inventory.csv"
-
-#: Append-only transaction ledger used by the Retrospective Weighting engine.
-TRANSACTION_LOG_CSV: Path = DATA_DIR / "transaction_log.csv"
-
-#: JSON file storing per-agent dynamic trust scores updated by the Analyst.
-AGENT_TRUST_SCORES_JSON: Path = DATA_DIR / "agent_trust_scores.json"
+#: Default workspace name used when no workspace is explicitly selected.
+DEFAULT_WORKSPACE: str = "default"
 
 # ---------------------------------------------------------------------------
 # Routing & Trust Score Thresholds

@@ -39,3 +39,10 @@ Sentinel/
 
 # Test artifacts
 test_out*.txt
+tests/crisis_results/
+
+# Runtime data (generated per-session)
+data/workspaces/
+data/inventory.csv
+data/transaction_log.csv
+data/agent_trust_scores.json

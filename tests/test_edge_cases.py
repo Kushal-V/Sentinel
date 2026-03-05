@@ -491,17 +491,14 @@ class TestTrustOverride(unittest.TestCase):
             }
         }
 
-    @patch("src.agents.orchestrator.ChatGoogleGenerativeAI")
-    @patch("src.agents.orchestrator.create_react_agent")
-    def setUp(self, mock_create_react, mock_llm_class) -> None:  # type: ignore[override]
+    @patch("src.agents.orchestrator.ChatGroq")
+    def setUp(self, mock_groq_class) -> None:  # type: ignore[override]
         """Instantiate AgentOrchestrator with all LLM calls mocked out."""
-        # Mock the LLM class so no actual Gemini API call is made on __init__
+        # Mock the ChatGroq class so no actual API call is made on __init__
         mock_llm_instance = MagicMock()
-        mock_llm_class.return_value = mock_llm_instance
+        mock_groq_class.return_value = mock_llm_instance
         mock_llm_instance.with_structured_output.return_value = mock_llm_instance
-
-        # Mock create_react_agent to return a simple MagicMock graph
-        mock_create_react.return_value = MagicMock()
+        mock_llm_instance.bind_tools.return_value = mock_llm_instance
 
         # Mock FactoryDataManager so no disk I/O occurs
         self.mock_manager = MagicMock()
@@ -511,7 +508,7 @@ class TestTrustOverride(unittest.TestCase):
 
         from src.agents.orchestrator import AgentOrchestrator
         self.orchestrator = AgentOrchestrator(data_manager=self.mock_manager)
-        self.MockLLMClass = mock_llm_class
+        self.mock_groq_class = mock_groq_class
         self.mock_llm_instance = mock_llm_instance
 
     def test_trust_override_triggers_when_score_below_threshold(self) -> None:

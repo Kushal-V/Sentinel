@@ -4,8 +4,9 @@ src/agents/orchestrator.py
 The AgentOrchestrator — the central brain of the Sentinel Digital Twin.
 
 This class is responsible for:
-1. Holding a single LangChain ``ChatGoogleGenerativeAI`` client shared across
-   all specialist agents (Maker, Mover, Keeper, Analyst).
+1. Holding three ``ChatGroq`` LLM clients (Dispatcher, Specialist, Analyst)
+   configured for different tasks (structured routing, ReAct tool-calling,
+   and trust-score analysis respectively).
 2. Running the Dispatcher pipeline using ``.with_structured_output()`` to
    produce a guaranteed ``DispatchRoute`` Pydantic object — no free-text
    routing decisions allowed.
@@ -14,10 +15,10 @@ This class is responsible for:
    live trust scores. If the chosen agent's score is below
    ``config.ROUTING_THRESHOLD``, the routing choice is overridden
    programmatically and the override is surfaced to the UI as a system event.
-4. Executing the chosen specialist agent as a ReAct-style tool-calling loop
-   using ``create_react_agent`` and ``AgentExecutor``.
-5. Streaming agent steps back to the Streamlit UI via a callback-compatible
-   generator so the user sees tool calls and reasoning in real-time.
+4. Executing the chosen specialist agent via a manual ReAct tool-calling
+   loop (``run_specialist``) with Groq XML error recovery.
+5. Streaming agent steps back to the Streamlit UI via a generator so the
+   user sees tool calls and reasoning in real-time.
 """
 
 from __future__ import annotations
@@ -35,6 +36,7 @@ from pydantic import BaseModel, Field
 from src.agents.prompts import (
     ANALYST_SYSTEM_PROMPT,
     DISPATCHER_SYSTEM_PROMPT,
+    INFO_QUERY_SYSTEM_PROMPT,
     KEEPER_SYSTEM_PROMPT,
     MAKER_SYSTEM_PROMPT,
     MOVER_SYSTEM_PROMPT,
@@ -42,7 +44,7 @@ from src.agents.prompts import (
 )
 from src.core import config
 from src.core.state_manager import FactoryDataManager
-from src.tools.tool_registry import SENTINEL_TOOLS
+from src.tools.tool_registry import INFO_TOOLS, SENTINEL_TOOLS, parse_groq_xml_tool_call
 
 logger = logging.getLogger(__name__)
 
@@ -137,11 +139,13 @@ class AgentOrchestrator:
     re-initialised on every Streamlit re-run.
 
     Attributes:
-        _llm: The shared ``ChatGoogleGenerativeAI`` client.
+        _dispatcher_llm: ``ChatGroq`` client for structured routing.
+        _specialist_llm: ``ChatGroq`` client for ReAct tool-calling agents.
+        _analyst_llm: ``ChatGroq`` client for trust-score analysis.
         _dispatcher_chain: An LLM chain with structured output enforcing
             ``DispatchRoute``.
-        _agent_graphs: Map of agent ID → compiled LangGraph ReAct graph.
-        _data_manager: Reference to the singleton ``FactoryDataManager``.
+        _agent_graphs: Map of agent ID → manual ReAct config dict.
+        _data_manager: Reference to the session ``FactoryDataManager``.
     """
 
     def __init__(self, data_manager: FactoryDataManager) -> None:
@@ -420,35 +424,16 @@ class AgentOrchestrator:
         MAX_ITERATIONS = 10
         final_text: str = ""
 
-        import json
-        import re
-
         try:
             for iteration in range(MAX_ITERATIONS):
                 # Call the LLM
                 try:
                     ai_msg = llm_with_tools.invoke(messages)
                 except Exception as e:
-                    err_str = str(e)
-                    # Catch the Groq XML `<function=...>` bug in the 400 error message
-                    match = re.search(r"<function=(\w+)[^>]*>(.*?)</function>|<function=(\w+)(.*?)</function>", err_str)
-                    if match:
-                        t_name = match.group(1) or match.group(3)
-                        t_args_str = match.group(2) or match.group(4)
-                        
-                        try:
-                            t_args = json.loads(t_args_str)
-                        except:
-                            # Fallback heuristic for arg string like 'search_term="SFT-HD"'
-                            val = re.sub(r'^.*?search_term\s*=\s*["\'](.*)["\'].*$', r'\1', t_args_str).strip()
-                            if val == t_args_str:
-                                val = t_args_str.replace('"', '').replace("'", "").strip()
-                            t_args = {"search_term": val}
-                            
-                        # If a state change delta fails to parse correctly, fallback
-                        if t_name == "propose_state_change" and not isinstance(t_args, dict):
-                             # Very basic rescue parsing if args are malformed string
-                             t_args = {}
+                    # Recover from Groq/Llama XML <function=...> bug
+                    parsed = parse_groq_xml_tool_call(str(e))
+                    if parsed:
+                        t_name, t_args = parsed
 
                         yield {
                             "type": "tool_call",
@@ -463,13 +448,13 @@ class AgentOrchestrator:
                                 res = f"TOOL ERROR: {tool_exc}"
                         else:
                             res = f"Unknown tool: {t_name}"
-                            
+
                         yield {
                             "type": "tool_result",
                             "tool": t_name,
                             "content": str(res),
                         }
-                            
+
                         # Inject a mock AI tool call and the Tool message so the agent sees the result
                         mock_tool_call = {"name": t_name, "args": t_args, "id": f"call_{len(messages)}"}
                         messages.append(AIMessage(content="", tool_calls=[mock_tool_call]))
@@ -591,6 +576,114 @@ class AgentOrchestrator:
         }
 
     # ------------------------------------------------------------------
+    # Public: Informational Query (no crisis fabrication)
+    # ------------------------------------------------------------------
+
+    def answer_query(
+        self,
+        query: str,
+        chat_history: list[HumanMessage | AIMessage],
+    ) -> Generator[dict[str, Any], None, None]:
+        """Answer an informational user query using tools but without crisis framing.
+
+        Uses the same ReAct tool loop as ``run_specialist`` but with a neutral
+        prompt that instructs the LLM to retrieve and present data — not to
+        fabricate crises or propose state changes.
+
+        Args:
+            query: The user's natural-language question.
+            chat_history: LangChain message history for context.
+
+        Yields:
+            Dicts with keys ``"type"`` and ``"content"``.
+        """
+        llm_with_tools = self._specialist_llm.bind_tools(INFO_TOOLS)
+        tool_map: dict[str, Any] = {t.name: t for t in INFO_TOOLS}
+
+        messages: list[Any] = [
+            SystemMessage(content=INFO_QUERY_SYSTEM_PROMPT),
+        ] + list(chat_history) + [
+            HumanMessage(content=query),
+        ]
+
+        MAX_ITERATIONS = 10
+        final_text: str = ""
+
+        try:
+            for iteration in range(MAX_ITERATIONS):
+                try:
+                    ai_msg = llm_with_tools.invoke(messages)
+                except Exception as e:
+                    parsed = parse_groq_xml_tool_call(str(e))
+                    if parsed:
+                        t_name, t_args = parsed
+                        yield {"type": "tool_call", "tool": t_name, "content": str(t_args)}
+                        if t_name in tool_map:
+                            try:
+                                res = tool_map[t_name].invoke(input=t_args, config={"configurable": {"agent_id": "info"}})
+                            except Exception as tool_exc:
+                                res = f"TOOL ERROR: {tool_exc}"
+                        else:
+                            res = f"Unknown tool: {t_name}"
+                        yield {"type": "tool_result", "tool": t_name, "content": str(res)}
+                        mock_tc = {"name": t_name, "args": t_args, "id": f"call_{len(messages)}"}
+                        messages.append(AIMessage(content="", tool_calls=[mock_tc]))
+                        messages.append(ToolMessage(content=str(res), tool_call_id=mock_tc["id"], name=t_name))
+                        continue
+                    else:
+                        yield {"type": "error", "content": f"LLM API Error: {e}"}
+                        break
+
+                messages.append(ai_msg)
+
+                msg_text = ""
+                if isinstance(ai_msg.content, str):
+                    msg_text = re.sub(r"<think>.*?</think>", "", ai_msg.content, flags=re.DOTALL).strip()
+                elif isinstance(ai_msg.content, list):
+                    parts = []
+                    for block in ai_msg.content:
+                        if isinstance(block, dict) and block.get("type") == "text":
+                            parts.append(block.get("text", ""))
+                        elif isinstance(block, str):
+                            parts.append(block)
+                    msg_text = "\n".join(parts)
+
+                if not ai_msg.tool_calls:
+                    final_text = msg_text or final_text
+                    break
+
+                if msg_text.strip():
+                    final_text = msg_text
+
+                for tc in ai_msg.tool_calls:
+                    tool_name = tc.get("name", "unknown_tool")
+                    tool_args = tc.get("args", {})
+                    tool_call_id = tc.get("id", "")
+                    yield {"type": "tool_call", "tool": tool_name, "content": str(tool_args)}
+                    if tool_name in tool_map:
+                        try:
+                            tool_result = tool_map[tool_name].invoke(
+                                input=tool_args,
+                                config={"configurable": {"agent_id": "info"}},
+                            )
+                        except Exception as tool_exc:
+                            tool_result = f"TOOL ERROR: {tool_exc}"
+                    else:
+                        tool_result = f"TOOL ERROR: Unknown tool '{tool_name}'"
+                    messages.append(ToolMessage(content=str(tool_result), tool_call_id=tool_call_id, name=tool_name))
+                    yield {"type": "tool_result", "tool": tool_name, "content": str(tool_result)}
+
+        except Exception as exc:
+            yield {"type": "error", "content": f"Query execution failed: {exc}"}
+            return
+
+        yield {
+            "type": "final_answer",
+            "content": final_text or "No relevant data found for your query.",
+            "agent_id": "info",
+        }
+
+    # ------------------------------------------------------------------
     # Public: Analyst (Trust Score Updater — Claim B engine)
     # ------------------------------------------------------------------
 
@@ -598,11 +691,11 @@ class AgentOrchestrator:
         self,
         chat_history: list[HumanMessage | AIMessage],
     ) -> str:
-        """Run the Analyst agent using Anthropic for trust score evaluation.
+        """Run the Analyst agent using Groq for trust score evaluation.
 
         The Analyst does NOT need tools — it reads the full transaction ledger
-        passed directly in the prompt.  Claude's large context window is ideal
-        for processing the entire CSV log in a single pass.
+        passed directly in the prompt.  The large context window of llama-3.3-70b
+        is ideal for processing the entire CSV log in a single pass.
 
         Args:
             chat_history: Current session message history for context.
@@ -622,7 +715,7 @@ class AgentOrchestrator:
         )
 
         try:
-            # Direct Anthropic chat call — no tool loop needed for pure analysis
+            # Direct Groq chat call — no tool loop needed for pure analysis
             messages: list[Any] = [
                 SystemMessage(content=ANALYST_SYSTEM_PROMPT),
                 *list(chat_history),
@@ -643,7 +736,7 @@ class AgentOrchestrator:
                     try:
                         # Clean up any inner spaces before parsing float
                         delta_str = raw_delta.replace(" ", "")
-                        delta = float(delta_str)
+                        delta = max(-0.15, min(0.15, float(delta_str)))
                         updated = self._data_manager.update_trust_score(
                             agent_id=agent_id_clean,
                             score_delta=delta,
@@ -697,7 +790,7 @@ class AgentOrchestrator:
         
         for agent_role, agent_focus in agent_personas.items():
             # Build a list of real product identifiers the scanner can reference
-            pk_col = schema_profile.primary_key
+            pk_col = schema_profile.primary_key_column
             real_ids = inv_df[pk_col].astype(str).tolist() if pk_col in inv_df.columns else []
             real_ids_str = ", ".join(real_ids[:50])  # Cap at 50 to avoid token overflow
 
