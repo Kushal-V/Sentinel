@@ -1,0 +1,61 @@
+vessel_id,vessel_name,vessel_type,vessel_class,flag_state,route,containers_loaded,teu_limit,reefer_containers,reefer_plug_capacity,speed_knots,fuel_efficiency_g_co2_per_teu_km,estimated_arrival_days,charter_rate_usd_per_day,captain
+IMO-9861319,Silva Express,RoRo,"Large (14,000 TEU)",Cyprus,Mumbai → Colombo → Singapore,12376,14005,556,565,17.5,5.73,18,83520.0,Taylor Harris
+IMO-9350405,Moran Express,RoRo,"Panamax (5,000 TEU)",Marshall Islands,Guangzhou → Sydney,3418,4784,390,722,21.4,2.76,8,17721.0,James Powers
+IMO-9718849,Evans Express,RoRo,"Large (14,000 TEU)",Marshall Islands,Singapore → Los Angeles,11008,12411,4,15,23.1,3.1,36,68177.0,Paul Jones
+IMO-9377896,Ellis Meridian,RoRo,"Large (14,000 TEU)",Greece,Shanghai → Rotterdam,11240,13628,162,389,22.6,7.61,45,13268.0,Dr. Angel Lewis MD
+IMO-9761820,Mahoney Star,Container Ship,"Feeder (1,500 TEU)",Cyprus,Hamburg → New York,1154,1194,648,778,23.8,3.04,25,77564.0,Sherry Wood
+IMO-9148225,Moore Meridian,Bulk Carrier,"Large (14,000 TEU)",Marshall Islands,Hamburg → New York,8982,12229,289,421,16.4,5.08,11,54931.0,Michele Carr
+IMO-9501126,Archer Spirit,Tanker,"Panamax (5,000 TEU)",Panama,Guangzhou → Sydney,3551,4493,235,260,18.6,3.36,24,60176.0,Aimee Montoya
+IMO-9265649,Evans Spirit,RoRo,"Ultra Large (24,000 TEU)",Malta,Busan → Long Beach,21040,22904,256,706,23.6,4.29,30,73707.0,Teresa Taylor
+IMO-9211834,Wilson Spirit,RoRo,"Very Large (18,000 TEU)",Malta,Shanghai → Rotterdam,13376,16562,21,22,21.0,4.28,42,74610.0,Juan Nelson
+IMO-9916118,Jacobs Star,Reefer,"Feeder (1,500 TEU)",Singapore,Busan → Long Beach,856,950,117,293,23.0,5.48,18,55809.0,Christina Walters
+IMO-9810687,Baker Horizon,Tanker,"Feeder (1,500 TEU)",Cyprus,Shanghai → Rotterdam,1393,1685,40,661,23.0,6.27,43,36094.0,Taylor Mathis Jr.
+IMO-9237795,Henderson Star,Reefer,"Ultra Large (24,000 TEU)",Greece,Dubai → Felixstowe,17540,23862,374,552,16.0,4.99,16,27787.0,Aaron Wise
+IMO-9964749,Walsh Star,Bulk Carrier,"Post-Panamax (10,000 TEU)",Bahamas,Santos → Rotterdam,8629,9981,38,479,22.0,7.72,41,36165.0,Patrick Arnold
+IMO-9929090,Patterson Pioneer,Reefer,"Post-Panamax (10,000 TEU)",Hong Kong,Mumbai → Colombo → Singapore,5822,8028,268,688,20.7,5.23,12,59962.0,Benjamin Ware
+IMO-9594379,Mckee Spirit,RoRo,"Ultra Large (24,000 TEU)",Malta,Santos → Rotterdam,20726,23268,64,663,20.1,4.47,13,18763.0,Sandra Aguilar
+IMO-9139019,Hernandez Horizon,Reefer,"Large (14,000 TEU)",Hong Kong,Algeciras → Baltimore,9336,14017,189,464,15.4,7.82,15,76177.0,Eric Nolan
+IMO-9786735,Flynn Express,Bulk Carrier,"Ultra Large (24,000 TEU)",Cyprus,Guangzhou → Sydney,18689,23707,379,706,16.8,8.13,21,73870.0,Stephanie Clark
+IMO-9204180,Wright Star,RoRo,"Feeder (1,500 TEU)",Liberia,Busan → Long Beach,1022,1276,31,194,18.0,4.65,44,82774.0,Richard Henson
+IMO-9153035,Russell Spirit,Reefer,"Large (14,000 TEU)",Bahamas,Busan → Long Beach,12376,12997,212,567,22.3,3.73,27,67626.0,Brittany Spears
+IMO-9926952,Hancock Horizon,Container Ship,"Panamax (5,000 TEU)",Marshall Islands,Shanghai → Rotterdam,2921,4005,28,178,19.4,8.43,28,68829.0,Rita Keith
+IMO-9349489,Johnson Meridian,Container Ship,"Panamax (5,000 TEU)",Cyprus,Guangzhou → Sydney,2764,4663,116,538,21.4,2.81,29,47519.0,Evelyn Galvan
+IMO-9214351,Pham Spirit,Tanker,"Post-Panamax (10,000 TEU)",Cyprus,Shanghai → Rotterdam,6415,9031,533,674,21.8,2.76,9,84891.0,Rita Adams
+IMO-9988456,Cobb Express,Reefer,"Post-Panamax (10,000 TEU)",Marshall Islands,Singapore → Los Angeles,7391,8873,41,82,18.4,6.77,14,29176.0,Shane Garrison
+IMO-9763829,Walker Express,Reefer,"Panamax (5,000 TEU)",Hong Kong,Singapore → Los Angeles,4299,5123,258,464,19.3,8.47,13,73665.0,Julia Torres
+IMO-9782535,Pope Horizon,Container Ship,"Panamax (5,000 TEU)",Singapore,Santos → Rotterdam,3434,4440,212,408,22.3,4.98,26,59213.0,Alexander Lee
+IMO-9492483,Murphy Pioneer,Tanker,"Very Large (18,000 TEU)",Marshall Islands,Tanjung Pelepas → Le Havre,16160,17813,49,442,14.9,3.05,9,53158.0,Tracy Ramirez
+IMO-9688866,May Express,Container Ship,"Panamax (5,000 TEU)",Malta,Algeciras → Baltimore,3877,4675,433,768,20.7,4.62,25,35077.0,William Herrera
+IMO-9705991,Crosby Express,Container Ship,"Panamax (5,000 TEU)",Malta,Algeciras → Baltimore,3033,4435,376,569,15.1,3.85,20,70156.0,Wesley White
+IMO-9986209,Estes Star,Tanker,"Panamax (5,000 TEU)",Singapore,Mumbai → Colombo → Singapore,3110,5140,69,184,16.7,7.48,6,21968.0,Brian Hamilton
+IMO-9250210,Chandler Star,Bulk Carrier,"Panamax (5,000 TEU)",Hong Kong,Santos → Rotterdam,3084,4820,543,764,14.3,6.3,35,34249.0,Larry Dixon
+IMO-9488028,Cruz Spirit,Reefer,"Large (14,000 TEU)",Panama,Singapore → Los Angeles,11409,13328,40,159,22.8,6.08,23,42120.0,Dawn Fletcher
+IMO-9544611,Smith Meridian,Container Ship,"Post-Panamax (10,000 TEU)",Malta,Algeciras → Baltimore,7177,9243,220,353,19.1,3.79,37,48574.0,Kimberly Ball
+IMO-9423401,Harmon Spirit,Bulk Carrier,"Ultra Large (24,000 TEU)",Malta,Dubai → Felixstowe,17157,22451,196,216,16.0,2.83,26,17239.0,Helen Jones
+IMO-9621546,Beck Express,Container Ship,"Feeder (1,500 TEU)",Hong Kong,Shanghai → Rotterdam,928,1340,362,572,16.3,5.7,33,9443.0,Erik Charles
+IMO-9181644,Cortez Star,Tanker,"Large (14,000 TEU)",Marshall Islands,Algeciras → Baltimore,11116,13758,10,414,16.9,6.34,35,72066.0,Eric Ortiz
+IMO-9479430,Powell Horizon,Tanker,"Ultra Large (24,000 TEU)",Singapore,Busan → Long Beach,20068,22894,50,80,18.0,5.11,27,67992.0,Cameron Fisher
+IMO-9180089,Bentley Horizon,Bulk Carrier,"Panamax (5,000 TEU)",Bahamas,Singapore → Los Angeles,3378,4233,660,744,17.5,7.94,15,27710.0,Stephanie Gilbert
+IMO-9281926,Turner Star,RoRo,"Panamax (5,000 TEU)",Norway,Algeciras → Baltimore,3672,4313,505,643,23.5,2.95,34,60447.0,April Mitchell
+IMO-9691912,Jordan Meridian,Container Ship,"Feeder (1,500 TEU)",Cyprus,Guangzhou → Sydney,1471,1550,112,154,20.3,7.69,25,69317.0,Mary Marshall
+IMO-9720148,Ramos Meridian,Container Ship,"Ultra Large (24,000 TEU)",Liberia,Algeciras → Baltimore,18010,22720,146,377,14.4,5.27,44,47044.0,John Santana
+IMO-9585188,Flynn Star,Tanker,"Panamax (5,000 TEU)",Norway,Guangzhou → Sydney,4744,5135,192,585,18.5,7.88,38,19616.0,Bradley Robertson
+IMO-9164879,Schultz Meridian,Container Ship,"Post-Panamax (10,000 TEU)",Bahamas,Guangzhou → Sydney,7110,8211,176,661,14.8,8.39,34,48353.0,Robert Potter
+IMO-9739427,Chambers Meridian,Container Ship,"Very Large (18,000 TEU)",Singapore,Singapore → Los Angeles,12500,16490,612,695,21.7,4.82,27,15277.0,Curtis Johnson
+IMO-9811332,Sanchez Star,Container Ship,"Post-Panamax (10,000 TEU)",Norway,Hamburg → New York,6187,8581,85,153,20.0,8.29,28,31888.0,Samuel Jones
+IMO-9787923,Perry Spirit,Tanker,"Feeder (1,500 TEU)",Marshall Islands,Tanjung Pelepas → Le Havre,1204,1578,385,572,14.8,6.75,11,57744.0,Cheyenne Horton
+IMO-9543973,Snyder Meridian,Bulk Carrier,"Panamax (5,000 TEU)",Bahamas,Hamburg → New York,2825,4741,497,784,16.1,3.58,15,13942.0,Matthew Smith
+IMO-9985447,Potter Star,Bulk Carrier,"Ultra Large (24,000 TEU)",Norway,Santos → Rotterdam,19685,23039,316,344,14.4,7.8,15,20493.0,Ashley Coleman
+IMO-9971728,Thompson Horizon,Bulk Carrier,"Feeder (1,500 TEU)",Cyprus,Algeciras → Baltimore,1383,1689,346,373,14.4,6.83,24,65934.0,Kelly Williams
+IMO-9921874,Wright Meridian,Reefer,"Post-Panamax (10,000 TEU)",Cyprus,Guangzhou → Sydney,6774,8479,94,198,21.8,8.29,24,67916.0,Joyce Solis
+IMO-9627335,Contreras Horizon,RoRo,"Panamax (5,000 TEU)",Singapore,Tanjung Pelepas → Le Havre,4525,4857,26,256,15.4,7.31,12,62778.0,Linda Dodson DVM
+IMO-9640970,Salazar Horizon,Container Ship,"Ultra Large (24,000 TEU)",Bahamas,Guangzhou → Sydney,14649,22583,111,150,23.1,4.14,28,79646.0,Kathy Rivas
+IMO-9535050,Kelley Horizon,Tanker,"Ultra Large (24,000 TEU)",Liberia,Mumbai → Colombo → Singapore,18053,22811,7,229,14.8,4.82,15,18595.0,Natasha Wells
+IMO-9400814,Green Star,Tanker,"Post-Panamax (10,000 TEU)",Bahamas,Hamburg → New York,8220,9425,2,81,20.2,5.31,41,80397.0,Mark Cannon
+IMO-9738457,Boyd Meridian,Reefer,"Panamax (5,000 TEU)",Cyprus,Singapore → Los Angeles,3229,4866,107,244,15.2,3.93,13,72425.0,Denise Jones
+IMO-9624108,Mitchell Spirit,Container Ship,"Panamax (5,000 TEU)",Norway,Mumbai → Colombo → Singapore,3025,5097,219,298,21.2,5.95,21,51941.0,Francisco Fernandez
+IMO-9296412,Taylor Meridian,Reefer,"Feeder (1,500 TEU)",Panama,Santos → Rotterdam,1029,1584,519,519,19.3,2.91,36,11352.0,Michael Mccarthy
+IMO-9505674,Brown Meridian,Container Ship,"Large (14,000 TEU)",Norway,Mumbai → Colombo → Singapore,11058,13038,672,750,17.4,7.23,14,11414.0,Joshua Perry
+IMO-9672536,Clark Star,Bulk Carrier,"Large (14,000 TEU)",Liberia,Guangzhou → Sydney,11088,12717,186,646,21.0,5.29,8,30595.0,Taylor Silva
+IMO-9145934,Dominguez Meridian,Tanker,"Very Large (18,000 TEU)",Panama,Busan → Long Beach,11248,15171,484,556,23.9,5.59,24,35487.0,Pamela James
+IMO-9918771,Smith Meridian,RoRo,"Ultra Large (24,000 TEU)",Hong Kong,Mumbai → Colombo → Singapore,19638,23773,380,409,17.7,3.25,17,46208.0,Paul Castaneda

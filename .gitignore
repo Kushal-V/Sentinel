@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environment
+.venv/
+venv/
+ENV/
+
+# Environment variables
+.env
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Byte-compiled
+*.pyc
+
+# UV lock (large file)
+uv.lock
+
+# Embedded repos
+Sentinel/
+
+# Pytest
+.pytest_cache/
+
+# Test artifacts
+test_out*.txt

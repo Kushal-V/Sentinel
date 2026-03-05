@@ -1,0 +1,81 @@
+ward_id,department,ward_name,currently_admitted,max_bed_capacity,avg_length_of_stay_days,icu_level,daily_cost_usd,staff_on_duty,ventilators_in_use,pending_admissions,contact_consultant
+WARD-PSYC-2A,Cardiology,Neurology Ward,12,18,4.7,0,6655.84,3,0,0,Allison Hill
+WARD-CARD-2B,Cardiology,General Surgery,12,16,6.1,1,22364.24,3,2,4,Noah Rhodes
+WARD-GERI-1B,Oncology,Neurology Ward,17,24,24.5,0,9632.36,2,0,6,Angie Henderson
+WARD-NEUR-6C,Surgery,General Surgery,27,40,10.4,0,13029.87,2,0,8,Daniel Wagner
+WARD-ONCO-6B,Surgery,Maternity,6,12,7.5,0,3725.54,2,0,6,Cristian Santos
+WARD-ONCO-8C,Surgery,Renal Dialysis,10,14,7.1,0,6071.3,2,0,8,Connie Lawrence
+WARD-RESP-4B,Cardiology,Maternity,20,28,14.0,0,23842.85,4,0,12,Abigail Shaffer
+WARD-CARD-6D,Oncology,Maternity,9,18,12.4,3,35923.74,3,1,10,Gina Moore
+WARD-EMER-3C,Neurology,General Surgery,9,14,7.1,3,28325.55,3,1,3,Gabrielle Davis
+WARD-ORTH-8A,Emergency,Renal Dialysis,9,10,5.5,0,5081.68,2,0,6,Ryan Munoz
+WARD-SURG-8C,Cardiology,Geriatrics,30,32,15.9,0,13758.32,4,0,12,Monica Herrera
+WARD-PSYC-6A,Psychiatry,Burns Unit,13,18,24.3,0,10273.81,2,0,8,Jamie Arnold
+WARD-NEUR-5B,Cardiology,Cardiology ICU,10,14,24.2,0,5711.62,3,0,7,Lisa Hensley
+WARD-CARD-2C,Surgery,Neurology Ward,12,18,12.4,3,28537.1,3,0,12,Michele Williams
+WARD-BURN-3B,Neurology,General Surgery,37,48,7.1,1,115422.56,5,2,6,Dylan Miller
+WARD-PSYC-6D,Medicine,Renal Dialysis,24,32,4.0,0,15262.3,6,0,3,Brian Ramirez
+WARD-RENAL-4A,Medicine,Paediatrics,10,12,4.1,1,19412.97,2,1,10,Holly Wood
+WARD-EMER-4B,Emergency,Maternity,33,40,10.6,1,78645.38,2,3,5,Derek Zuniga
+WARD-SURG-7D,Emergency,Respiratory Care,8,10,4.6,0,9504.99,3,0,12,Lisa Jackson
+WARD-NEUR-4B,Rehabilitation,Maternity,12,16,5.9,0,6661.64,2,0,7,Carla Gray
+WARD-GERI-2A,Paediatrics,Orthopaedics,48,48,25.3,0,51696.99,8,0,7,Margaret Hawkins DDS
+WARD-EMER-4D,Rehabilitation,Oncology,6,10,9.2,2,10831.04,3,0,3,Patty Perez
+WARD-ONCO-4A,Medicine,Renal Dialysis,35,40,7.9,0,17350.14,5,0,8,Ethan Adams
+WARD-BURN-3A,Paediatrics,General Surgery,17,32,13.0,1,38181.66,4,1,9,Tommy Walter
+WARD-RENAL-1A,Psychiatry,Maternity,20,24,7.9,3,63130.89,4,1,4,Matthew Foster
+WARD-SURG-3C,Rehabilitation,Renal Dialysis,20,28,4.2,0,20277.97,2,0,1,Judy Baker
+WARD-BURN-4C,Oncology,Oncology,13,14,20.7,1,50882.96,3,2,11,Justin Baker
+WARD-ONCO-1C,Surgery,Respiratory Care,27,48,7.1,0,29932.07,6,0,2,Stephanie Ross
+WARD-ONCO-5B,Rehabilitation,Oncology,13,20,7.1,0,12033.82,2,0,1,Zachary Hicks
+WARD-PSYC-7C,Psychiatry,Orthopaedics,4,10,13.9,0,4113.36,3,0,8,Anthony Rodriguez
+WARD-RESP-7A,Cardiology,Cardiology ICU,6,12,21.7,0,6673.98,3,0,9,Rebecca Henderson
+WARD-BURN-3D,Medicine,Paediatrics,7,14,23.1,1,18726.15,2,0,5,James Ferrell
+WARD-GERI-7B,Emergency,Cardiology ICU,15,16,18.4,0,17732.32,2,0,11,Tricia Valencia
+WARD-PAED-7B,Medicine,Emergency,11,18,9.0,0,10735.55,2,0,3,Nathan Maldonado
+WARD-EMER-6C,Psychiatry,Neurology Ward,10,16,9.3,2,33840.8,3,2,8,Debra Davidson
+WARD-SURG-6A,Psychiatry,Cardiology ICU,11,12,12.7,0,7105.03,2,0,9,Jeffrey Chavez
+WARD-SURG-6C,Neurology,Maternity,20,24,9.1,0,16671.35,4,0,0,Sherri Baker
+WARD-SURG-2C,Psychiatry,Burns Unit,28,40,15.9,0,30408.32,4,0,10,Cassandra Gaines
+WARD-SURG-6D,Emergency,Psychiatric,14,18,14.5,0,8314.32,2,0,9,Elizabeth Fowler
+WARD-RENAL-5D,Neurology,Renal Dialysis,29,32,6.3,3,73349.7,4,3,7,Brittany Farmer
+WARD-GERI-3A,Paediatrics,Psychiatric,14,18,8.2,0,12945.88,3,0,3,Paula Moreno
+WARD-GERI-4B,Surgery,Emergency,5,10,13.4,0,5939.76,3,0,10,Fred Smith
+WARD-RENAL-4D,Surgery,Geriatrics,21,28,15.1,2,45237.6,3,1,12,Sherry Decker
+WARD-RESP-8A,Rehabilitation,Psychiatric,21,32,10.3,0,22811.3,4,0,12,Anthony Humphrey
+WARD-EMER-7D,Paediatrics,Psychiatric,12,14,7.0,2,35270.62,3,2,3,Angelica Tucker
+WARD-ONCO-8A,Surgery,Orthopaedics,12,18,21.3,0,8422.63,2,0,3,Philip Cannon
+WARD-SURG-3B,Medicine,Maternity,9,12,10.5,0,6283.45,3,0,6,John Pierce
+WARD-GERI-1D,Emergency,Burns Unit,12,28,16.7,0,8565.83,2,0,7,Shane Henderson
+WARD-MATN-5D,Emergency,Respiratory Care,13,28,14.9,0,9127.26,2,0,7,Joshua Blair
+WARD-ORTH-1D,Obstetrics,Emergency,32,40,14.0,0,15050.45,3,0,0,Eric Carney
+WARD-ONCO-7C,Psychiatry,Geriatrics,12,16,20.7,0,8437.5,3,0,4,Jessica Holmes
+WARD-NEUR-8A,Surgery,Geriatrics,16,32,6.5,0,18623.04,4,0,0,Danny Morgan
+WARD-MATN-1B,Paediatrics,Emergency,9,16,12.4,0,8568.85,3,0,12,Crystal Robinson
+WARD-PAED-3A,Psychiatry,Renal Dialysis,14,14,3.1,0,7435.04,3,0,6,Mark Perez
+WARD-RESP-4A,Psychiatry,Psychiatric,34,40,4.7,0,31294.68,6,0,12,Shannon Jones
+WARD-NEUR-1C,Oncology,Cardiology ICU,24,32,11.2,0,17470.28,5,0,7,Michael Lewis
+WARD-NEUR-7C,Obstetrics,Respiratory Care,46,48,5.4,0,36561.01,10,0,10,Timothy Duncan
+WARD-ONCO-8D,Paediatrics,Neurology Ward,22,24,8.0,0,19675.83,4,0,7,Richard Aguirre
+WARD-MATN-8D,Paediatrics,Paediatrics,9,20,5.9,0,9793.93,3,0,5,Brent Jordan
+WARD-ONCO-5A,Rehabilitation,Burns Unit,32,32,15.9,0,16454.71,8,0,3,John Daniel
+WARD-RESP-8D,Paediatrics,Oncology,25,28,6.4,0,12994.75,6,0,5,Victoria Garcia
+WARD-EMER-6D,Psychiatry,Maternity,23,32,7.2,1,80197.59,3,2,1,Gerald Hensley
+WARD-RESP-3B,Cardiology,Renal Dialysis,14,16,12.9,0,9203.25,3,0,1,Connor West
+WARD-MATN-5B,Psychiatry,Cardiology ICU,12,20,11.8,0,5527.34,2,0,8,Donald Wright
+WARD-ONCO-3D,Rehabilitation,Paediatrics,11,12,10.6,0,9686.03,2,0,0,Jessica Callahan
+WARD-NEUR-7D,Neurology,Oncology,9,12,5.4,0,8683.54,2,0,3,Amber Kidd
+WARD-NEUR-7B,Neurology,General Surgery,23,32,7.6,0,26021.7,4,0,9,Tracy House
+WARD-ONCO-2B,Rehabilitation,Respiratory Care,10,16,2.0,0,5062.99,3,0,4,Carol Tucker
+WARD-CARD-4C,Psychiatry,Geriatrics,15,18,15.1,3,43345.13,2,3,1,James Brown
+WARD-BURN-4B,Psychiatry,Renal Dialysis,16,18,5.6,3,31542.14,4,2,7,William Baker
+WARD-NEUR-8C,Surgery,Renal Dialysis,23,24,11.0,0,18983.15,2,0,6,Jordan Henderson
+WARD-RESP-6C,Neurology,Renal Dialysis,5,10,19.2,0,5857.17,2,0,12,Whitney Peters
+WARD-PSYC-5A,Obstetrics,Renal Dialysis,10,14,22.3,0,9386.32,3,0,10,Brittney Phillips
+WARD-EMER-2D,Obstetrics,Paediatrics,15,20,4.7,2,38558.1,3,2,10,Lauren Daniels
+WARD-SURG-1D,Emergency,Burns Unit,8,12,25.4,0,5539.64,2,0,10,Amy Silva
+WARD-BURN-8D,Rehabilitation,Geriatrics,6,10,16.8,1,16009.62,2,1,8,Sarah Moore
+WARD-ORTH-5D,Paediatrics,Respiratory Care,16,28,13.3,0,18877.76,2,0,4,Angela Lopez
+WARD-BURN-1D,Surgery,Psychiatric,7,12,4.9,1,26735.62,3,1,8,Megan Young
+WARD-RESP-5D,Emergency,Maternity,28,28,12.1,0,17718.35,6,0,8,Steve Sanchez
+WARD-RESP-3A,Cardiology,Oncology,16,18,8.3,0,17452.95,2,0,4,Lisa Barnes

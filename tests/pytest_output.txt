@@ -1,0 +1,8 @@
+﻿..............................                                           [100%]
+============================== warnings summary ===============================
+tests/test_edge_cases.py::TestTrustOverride::test_no_override_when_trust_is_healthy
+  C:\Python311\Lib\site-packages\starlette\formparsers.py:10: PendingDeprecationWarning: Please use `import python_multipart` instead.
+    import multipart
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+30 passed, 1 warning in 4.88s

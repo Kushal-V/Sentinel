@@ -1,0 +1,76 @@
+rack_id,data_centre_location,server_type,active_compute_tb,max_compute_allowance,power_draw_kw,max_power_kw,servers_online,servers_total,avg_cpu_utilisation_pct,avg_ram_utilisation_pct,network_throughput_gbps,incidents_last_30d,sla_tier,support_contact
+RACK-US3-C60,EU-West-2 (London),High Frequency Trading Blade,29.72,78.2,26.58,80.43,12,32,36.5,51.8,32.95,5,Standard,vmedina@example.net
+RACK-AP1-D39,AP-Southeast-1 (Singapore),ARM Graviton (Cloud Native),43.62,75.2,4.84,9.6,23,32,56.4,59.6,256.15,0,Gold,tracynelson@example.com
+RACK-CA1-D24,US-East-1 (Virginia),Memory Optimised (2TB RAM),79.96,114.3,33.51,55.08,3,32,61.2,46.0,258.42,2,Premium,priceelizabeth@example.com
+RACK-EU4-A39,SA-East-1 (São Paulo),Memory Optimised (2TB RAM),181.83,307.7,32.81,63.85,9,32,56.5,57.1,260.17,1,Gold,marycalhoun@example.net
+RACK-US1-B32,EU-West-2 (London),ARM Graviton (Cloud Native),21.55,40.9,20.52,44.78,19,32,52.1,97.9,80.87,1,Gold,meadowsbrittany@example.net
+RACK-US3-B58,EU-West-2 (London),FPGA Accelerator,76.9,84.8,41.48,52.6,23,32,89.9,67.4,116.85,2,Platinum,millerroy@example.com
+RACK-CA1-B51,US-West-2 (Oregon),GPU Compute (H100),28.95,59.4,8.59,20.27,32,32,41.7,67.7,148.2,4,Platinum,brentgray@example.org
+RACK-EU4-A05,CA-Central-1 (Montreal),High Frequency Trading Blade,74.51,100.0,23.6,36.42,27,32,75.6,35.0,388.98,5,Gold,wmurphy@example.com
+RACK-US3-D44,AP-Southeast-1 (Singapore),GPU Compute (H100),139.62,180.5,28.02,41.66,12,32,77.6,38.8,201.64,0,Gold,karen64@example.org
+RACK-EU4-B20,AP-Southeast-1 (Singapore),Memory Optimised (2TB RAM),116.63,157.4,16.63,25.81,19,32,75.5,47.0,254.39,4,Standard,ismith@example.org
+RACK-EU2-C40,AP-Southeast-1 (Singapore),CPU General Purpose (Intel Xeon),46.33,67.3,9.84,16.44,22,32,70.1,68.3,330.27,0,Gold,jeffrey10@example.org
+RACK-US1-E17,CA-Central-1 (Montreal),Storage Dense (PetaByte NAS),444.63,1427.2,37.69,139.13,19,32,30.5,50.5,98.71,5,Premium,jamessmith@example.org
+RACK-AP1-D05,AP-Southeast-1 (Singapore),GPU Compute (A100),71.26,110.3,11.12,19.8,10,32,59.0,78.8,293.95,2,Premium,davidcaldwell@example.net
+RACK-EU2-C33,AP-Northeast-1 (Tokyo),CPU General Purpose (Intel Xeon),16.68,39.3,20.64,55.94,10,32,36.9,49.7,154.28,4,Premium,stevenscott@example.com
+RACK-EU2-B53,AP-Northeast-1 (Tokyo),GPU Compute (H100),32.09,70.4,41.84,105.55,30,32,43.3,51.0,10.25,3,Premium,catherinestuart@example.net
+RACK-EU2-B38,US-East-1 (Virginia),GPU Compute (H100),31.31,48.1,37.43,66.13,31,32,59.0,30.6,43.89,1,Standard,stricklandfrank@example.com
+RACK-CA1-C49,AP-Northeast-1 (Tokyo),ARM Graviton (Cloud Native),8.14,23.6,25.0,83.34,24,32,33.1,35.0,202.2,4,Standard,lanesarah@example.net
+RACK-EU4-E08,EU-West-2 (London),Memory Optimised (2TB RAM),136.26,174.5,16.36,24.09,24,32,78.2,43.5,204.14,4,Gold,tsanders@example.org
+RACK-US1-A09,SA-East-1 (São Paulo),GPU Compute (H100),55.07,123.1,37.85,97.3,9,32,41.0,71.7,65.84,4,Standard,vargasmaria@example.org
+RACK-EU4-C33,EU-Central-1 (Frankfurt),FPGA Accelerator,16.39,58.0,16.05,65.3,8,32,29.6,69.7,318.91,5,Gold,terrykevin@example.net
+RACK-EU4-D17,US-East-1 (Virginia),Storage Dense (PetaByte NAS),639.05,1375.3,27.61,68.33,25,32,40.9,76.3,13.6,5,Gold,hoganashlee@example.org
+RACK-EU2-A29,CA-Central-1 (Montreal),GPU Compute (H100),47.06,64.2,19.12,29.99,31,32,75.1,80.0,25.85,1,Platinum,amanda51@example.net
+RACK-EU4-C43,CA-Central-1 (Montreal),FPGA Accelerator,21.05,45.1,38.59,95.08,22,32,44.8,76.0,347.19,5,Standard,alexander67@example.org
+RACK-EU4-D13,EU-Central-1 (Frankfurt),Storage Dense (PetaByte NAS),673.81,1337.1,40.95,93.45,20,32,50.6,77.9,276.41,3,Standard,oyu@example.com
+RACK-US3-C36,EU-Central-1 (Frankfurt),High Frequency Trading Blade,21.6,29.7,17.93,28.35,26,32,73.7,94.9,322.04,2,Gold,ryangross@example.net
+RACK-AP1-A23,EU-Central-1 (Frankfurt),FPGA Accelerator,39.62,79.8,35.32,81.81,18,32,51.5,77.3,55.77,4,Platinum,christina87@example.com
+RACK-EU2-A43,US-West-2 (Oregon),Storage Dense (PetaByte NAS),354.19,578.7,31.03,58.3,7,32,60.4,39.3,385.84,1,Premium,lpetersen@example.com
+RACK-CA1-D31,EU-Central-1 (Frankfurt),Storage Dense (PetaByte NAS),702.09,981.8,38.43,61.8,6,32,70.1,45.8,295.74,0,Platinum,melissa14@example.com
+RACK-US3-B60,CA-Central-1 (Montreal),GPU Compute (A100),79.17,166.1,32.26,77.83,19,32,48.9,30.6,227.62,0,Standard,karenhudson@example.net
+RACK-AP1-D42,AP-Southeast-1 (Singapore),FPGA Accelerator,56.25,88.1,10.68,19.24,8,32,58.5,79.7,259.67,5,Platinum,frogers@example.com
+RACK-US1-C51,US-West-2 (Oregon),High Frequency Trading Blade,27.7,34.0,38.01,53.64,28,32,77.7,35.9,268.03,1,Platinum,tonykelly@example.com
+RACK-EU2-A17,US-West-2 (Oregon),ARM Graviton (Cloud Native),29.59,55.7,15.99,34.62,1,32,47.9,54.4,95.28,5,Gold,joshua94@example.net
+RACK-US3-C11,EU-Central-1 (Frankfurt),ARM Graviton (Cloud Native),53.56,75.2,39.7,64.1,24,32,69.3,44.9,54.29,1,Premium,blackjames@example.org
+RACK-CA1-E24,SA-East-1 (São Paulo),ARM Graviton (Cloud Native),63.23,80.6,35.23,51.64,16,32,77.4,70.5,315.16,4,Premium,wfreeman@example.org
+RACK-EU4-C05,US-East-1 (Virginia),CPU General Purpose (Intel Xeon),73.02,86.3,11.04,15.01,10,32,74.7,88.1,177.29,5,Platinum,fbrewer@example.com
+RACK-CA1-E32,SA-East-1 (São Paulo),CPU General Purpose (Intel Xeon),53.5,84.7,23.11,42.08,30,32,60.8,68.0,269.43,2,Gold,davisjeffrey@example.net
+RACK-US3-C53,US-West-2 (Oregon),GPU Compute (A100),44.57,132.5,16.57,56.65,5,32,32.2,34.1,357.79,3,Gold,kevinperkins@example.com
+RACK-AP1-D12,CA-Central-1 (Montreal),Memory Optimised (2TB RAM),142.33,169.9,20.6,28.28,25,32,77.5,76.4,265.06,4,Platinum,ronald85@example.com
+RACK-CA1-C08,CA-Central-1 (Montreal),Memory Optimised (2TB RAM),154.98,206.9,11.84,18.18,1,32,75.0,96.5,185.74,5,Premium,qnelson@example.org
+RACK-EU4-D53,US-West-2 (Oregon),Storage Dense (PetaByte NAS),538.81,1190.9,10.51,26.71,8,32,38.7,74.9,246.35,0,Platinum,griffithleslie@example.net
+RACK-EU2-A07,SA-East-1 (São Paulo),GPU Compute (A100),100.13,135.6,5.09,7.93,3,32,68.7,45.9,87.69,0,Platinum,jamesrodgers@example.com
+RACK-EU4-C15,AP-Northeast-1 (Tokyo),GPU Compute (H100),64.47,77.9,41.44,57.59,15,32,77.2,48.7,223.13,4,Platinum,tina34@example.org
+RACK-CA1-D36,US-East-1 (Virginia),FPGA Accelerator,85.91,97.8,29.25,38.3,21,32,86.9,57.8,120.66,1,Premium,harry08@example.org
+RACK-EU2-B20,SA-East-1 (São Paulo),Memory Optimised (2TB RAM),203.86,299.5,40.75,68.85,9,32,63.1,47.3,132.77,0,Premium,brandon08@example.com
+RACK-AP1-A35,US-East-1 (Virginia),Storage Dense (PetaByte NAS),655.51,902.7,26.59,42.11,5,32,64.5,81.8,290.0,4,Platinum,danamullins@example.org
+RACK-US3-B56,EU-Central-1 (Frankfurt),GPU Compute (H100),53.95,193.1,39.56,162.85,8,32,27.9,81.3,365.86,5,Platinum,andrewstaylor@example.com
+RACK-US3-B36,EU-Central-1 (Frankfurt),GPU Compute (H100),67.42,100.9,17.14,29.5,17,32,61.6,90.0,186.94,5,Premium,jack04@example.com
+RACK-AP1-B24,CA-Central-1 (Montreal),GPU Compute (H100),38.77,47.3,31.96,44.84,2,32,74.0,93.6,232.08,3,Standard,shortrichard@example.org
+RACK-EU2-B22,CA-Central-1 (Montreal),Storage Dense (PetaByte NAS),701.36,1354.7,24.56,54.55,22,32,46.7,85.9,386.64,5,Premium,hernandezlisa@example.com
+RACK-US3-B47,AP-Southeast-1 (Singapore),GPU Compute (H100),42.05,62.4,10.34,17.65,4,32,64.3,87.1,30.66,5,Gold,mcknightdavid@example.com
+RACK-US1-D09,EU-West-2 (London),Storage Dense (PetaByte NAS),407.81,1560.8,22.82,100.44,24,32,22.5,73.4,373.63,3,Premium,kimberlyjames@example.com
+RACK-US1-A35,US-East-1 (Virginia),ARM Graviton (Cloud Native),15.9,21.3,23.99,36.95,19,32,63.7,85.3,269.94,1,Gold,michelle64@example.net
+RACK-US1-E10,US-West-2 (Oregon),Storage Dense (PetaByte NAS),746.32,1429.7,16.95,37.34,26,32,45.2,95.2,184.14,1,Platinum,lynchjody@example.org
+RACK-AP1-A42,EU-West-2 (London),GPU Compute (A100),62.21,104.8,21.67,41.98,1,32,58.8,35.6,338.29,5,Standard,josephmiller@example.org
+RACK-EU4-A58,US-West-2 (Oregon),GPU Compute (A100),60.68,73.8,37.64,52.64,31,32,74.4,92.8,274.09,2,Gold,andreamoore@example.com
+RACK-EU2-C02,AP-Southeast-1 (Singapore),Storage Dense (PetaByte NAS),1209.01,1628.4,18.65,28.89,5,32,67.6,68.3,227.11,3,Standard,enorris@example.com
+RACK-US3-B51,AP-Northeast-1 (Tokyo),CPU General Purpose (Intel Xeon),15.16,24.3,35.74,65.89,22,32,60.6,71.7,238.65,2,Gold,halljasmine@example.net
+RACK-CA1-C51,SA-East-1 (São Paulo),FPGA Accelerator,25.92,38.3,17.77,30.2,12,32,66.7,74.9,35.19,4,Standard,ojones@example.com
+RACK-EU2-A06,AP-Southeast-1 (Singapore),High Frequency Trading Blade,39.08,50.4,9.19,13.63,25,32,70.8,37.2,3.07,2,Premium,ronaldstephens@example.net
+RACK-AP1-C07,EU-West-2 (London),Memory Optimised (2TB RAM),78.68,125.0,24.72,45.17,27,32,54.8,36.1,222.13,4,Standard,rebekahserrano@example.org
+RACK-US3-A19,CA-Central-1 (Montreal),ARM Graviton (Cloud Native),61.54,82.3,24.91,38.31,16,32,72.1,41.5,152.91,1,Standard,martinkyle@example.net
+RACK-AP1-C32,EU-West-2 (London),Memory Optimised (2TB RAM),64.46,120.1,14.83,31.78,5,32,49.5,94.2,288.64,3,Platinum,scott74@example.net
+RACK-US3-A09,US-East-1 (Virginia),High Frequency Trading Blade,54.61,95.9,27.26,55.05,22,32,53.4,59.3,329.59,5,Platinum,gbender@example.net
+RACK-AP1-C39,SA-East-1 (São Paulo),Storage Dense (PetaByte NAS),877.16,971.3,40.79,51.94,19,32,90.0,73.0,387.14,1,Standard,mkim@example.org
+RACK-US3-C08,AP-Southeast-1 (Singapore),Storage Dense (PetaByte NAS),1028.32,1522.6,40.18,68.42,30,32,70.1,44.3,319.28,5,Gold,mnavarro@example.com
+RACK-US3-D09,US-West-2 (Oregon),High Frequency Trading Blade,18.16,40.2,19.62,49.96,25,32,39.1,97.4,192.21,3,Premium,davissuzanne@example.net
+RACK-EU4-A51,EU-West-2 (London),GPU Compute (H100),29.86,57.5,28.99,64.19,11,32,50.9,33.0,393.46,5,Premium,keyemily@example.com
+RACK-AP1-D07,EU-West-2 (London),GPU Compute (A100),53.56,81.4,23.33,40.77,15,32,61.8,56.6,309.16,4,Platinum,hinesgregory@example.net
+RACK-AP1-A31,EU-Central-1 (Frankfurt),CPU General Purpose (Intel Xeon),47.95,53.3,7.7,9.84,10,32,82.7,53.3,313.92,4,Premium,lmoon@example.net
+RACK-US3-D21,EU-Central-1 (Frankfurt),CPU General Purpose (Intel Xeon),17.5,23.6,4.08,6.33,22,32,72.6,76.0,66.58,5,Platinum,fwalters@example.org
+RACK-EU4-B36,AP-Northeast-1 (Tokyo),Memory Optimised (2TB RAM),192.08,214.4,12.2,15.66,26,32,87.4,42.7,263.27,3,Gold,vbailey@example.com
+RACK-CA1-E57,SA-East-1 (São Paulo),Storage Dense (PetaByte NAS),832.52,1388.3,30.54,58.57,14,32,54.3,77.9,318.61,4,Gold,hodgemark@example.net
+RACK-EU4-B24,US-West-2 (Oregon),GPU Compute (H100),59.8,113.2,36.67,79.82,21,32,51.2,71.6,235.21,2,Standard,zroberts@example.net
+RACK-US3-E12,EU-West-2 (London),High Frequency Trading Blade,41.23,73.8,12.46,25.65,8,32,49.5,77.2,204.82,3,Platinum,gibsonleonard@example.com
+RACK-EU4-D28,SA-East-1 (São Paulo),Memory Optimised (2TB RAM),170.72,232.5,28.24,44.23,12,32,70.6,63.3,56.98,2,Premium,cordovarichard@example.net

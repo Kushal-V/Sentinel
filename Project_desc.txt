@@ -1,0 +1,178 @@
+================================================================================
+                    SENTINEL — Supply Chain Digital Twin
+              Multi-Agent AI Orchestration Platform (v1.0)
+================================================================================
+
+OVERVIEW
+--------
+Sentinel is a deterministic, multi-tenant Supply Chain Digital Twin powered by
+an autonomously governed multi-agent AI workforce. It combines the reasoning
+power of Large Language Models (LLMs) with a mathematically validated sandbox
+layer that prevents AI-generated state mutations from violating physical
+business constraints.
+
+The system is designed to handle any industry — Retail Apparel, Hospital
+Ward Management, Global Shipping Fleets, Data Centre Rack Utilisation — by
+dynamically inferring schema constraints from uploaded CSV data at runtime.
+
+
+TECHNOLOGY STACK
+----------------
+• Frontend:     Streamlit (Python) with custom CSS, dark-mode glassmorphism UI
+• Backend:      Pandas DataFrames (in-memory) with CSV/JSON file persistence
+• LLM Provider: Groq LPU (all agents — Dispatcher, Specialists, Analyst)
+• Framework:    LangChain + LangGraph for tool-calling ReAct loops
+• Models:       llama-3.1-8b-instant (Dispatcher), llama-3.3-70b-versatile
+                (Specialists + Analyst)
+• Validation:   Pydantic v2 for structured output enforcement
+
+
+ARCHITECTURE — THE SIX PILLARS
+------------------------------
+
+PILLAR 1: Multi-Tenant User Interface (Streamlit Frontend)
+  • Dynamic File Uploader: Accepts any CSV; the schema engine adapts on the
+    fly. No hardcoded "toy factory" columns.
+  • Live Data Dashboard: Real-time tabular view of the Master Clipboard.
+    AI-applied changes update instantly.
+  • Crisis Console: Chat-based interface streaming agent internal reasoning,
+    tool executions, and Sandbox rejections live.
+  • Human-in-the-Loop (HITL) Gate: Two-phase commit — agents propose, the
+    Sandbox validates, and humans approve before changes hit live data.
+  • Trust Score Visualiser: Animated progress bars showing real-time trust
+    scores (0.0 – 1.0) for each specialist agent.
+  • Multi-Agent Risk Scanner: On CSV upload, Maker/Mover/Keeper agents
+    automatically scan the data and suggest potential crises.
+
+PILLAR 2: Deterministic Data Core (Pandas Engine)
+  • FactoryDataManager: Thread-safe singleton managing inventory.csv,
+    transaction_log.csv, and agent_trust_scores.json. All file I/O is
+    atomic and locked during writes.
+  • DynamicSchemaInferencer: Uses regex and statistical profiling to detect
+    "Constraint Pairs" at runtime. E.g., it infers that beds_occupied <=
+    max_bed_capacity without human programming.
+
+PILLAR 3: Shadow Sandbox (Novelty Claim A)
+  • Deep Clone: Before any agent action, the Sandbox creates an isolated
+    in-memory copy of the entire dataset.
+  • Mathematical Assertion Engine: Checks proposed_value >= 0 AND
+    proposed_value <= dynamic_limit. Uses constraint pairs from the Schema
+    Inferencer.
+  • Feedback Loop: On rejection, returns exact violation details (column
+    name, overage amount, limit value) so the LLM can self-correct.
+
+PILLAR 4: Agentic Workforce (Hybrid Architecture)
+  • Dispatcher (llama-3.1-8b-instant): Fast routing agent. Takes crisis
+    input, outputs a strict Pydantic DispatchRoute JSON. No free-text.
+  • Maker: Production optimisation specialist. Adjusts stock levels,
+    production schedules.
+  • Mover: Logistics specialist. Optimises routes, freight costs, transit
+    times.
+  • Keeper: Warehouse/inventory specialist. Manages capacity, reallocation,
+    clearance actions.
+  • Analyst (llama-3.3-70b-versatile): Trust auditor. Reviews the full
+    transaction ledger and applies trust score deltas.
+  • Inter-Agent Communication: Agents can consult each other via the
+    ask_other_agent tool for cross-domain decisions (e.g., Keeper asks
+    Maker if production can be increased before proposing a stock change).
+
+PILLAR 5: Retrospective Authority Weighting (Novelty Claim B)
+  • ROI Evaluation: The Analyst audits the ledger, evaluating financial
+    impact of past agent decisions.
+  • Trust Score Penalty/Reward: Mathematically detrimental decisions or
+    repeated Sandbox rejections lower an agent's trust score.
+  • Dispatcher Override: If an agent's trust score drops below the
+    configurable threshold (default 0.50), the orchestrator overrides the
+    LLM's routing choice and reroutes to a safer fallback agent. A warning
+    is flashed in the UI.
+
+PILLAR 6: Testing & Simulation Engine
+  • Mock Event Generator: Sidebar dropdown with pre-built crisis payloads
+    (Port Strikes, Machine Breakdowns, Demand Spikes).
+  • Faker Data Pipeline: generate_test_data.py creates 4 industry-specific
+    CSV datasets (Hospital, Shipping, Server Farm, Retail Apparel) using
+    the Faker library.
+  • Edge Case Test Suite: tests/test_edge_cases.py with comprehensive
+    validation of the Schema Inferencer and Sandbox.
+
+
+RECENT ENHANCEMENTS (v1.0)
+--------------------------
+1. Groq-Only Architecture: Migrated all agents from multi-provider
+   (Google + Anthropic) to Groq LPU for unified, low-latency inference.
+
+2. Groq XML Tool-Call Fallback: Llama models on Groq sometimes emit
+   <function=...> XML instead of native JSON tool calls. A regex-based
+   fallback parser in the orchestrator intercepts these 400 errors,
+   extracts the tool name/args, executes them locally, and resumes the
+   ReAct loop transparently.
+
+3. Multi-Agent CSV Auto-Scan: When a user uploads a CSV, three concurrent
+   scanner instances (acting as Maker, Mover, Keeper) analyze the data
+   and suggest potential crises as clickable buttons in the sidebar.
+
+4. Inter-Agent Communication: The ask_other_agent tool allows specialists
+   to consult each other during a ReAct loop. A sub-agent is instantiated
+   with the target's persona and read-only tools, returning a consultative
+   response.
+
+5. Analyst Trust Evaluation Fix: Removed erroneous tool-call instruction
+   from the Analyst prompt. Loosened the TRUST SCORE DELTA regex to handle
+   spacing variations. The Analyst now correctly parses and applies trust
+   score deltas after reviewing the transaction ledger.
+
+6. Two-Phase Commit for HITL: State changes are staged (not committed)
+   during the agent's ReAct loop. Only when the human clicks "Approve &
+   Execute" are the changes flushed to the live Master Clipboard.
+
+
+DATA FLOW SUMMARY
+-----------------
+1. User uploads a random CSV.
+2. DynamicSchemaInferencer maps constraint rules automatically.
+3. Multi-Agent Scanner suggests potential crises.
+4. User triggers a crisis (or clicks a suggested one).
+5. Dispatcher checks Trust Scores and routes to a specialist.
+6. Specialist Agent queries data via tools and proposes a fix.
+7. Shadow Sandbox validates the proposal mathematically.
+   - If REJECTED: agent reads the error and recalculates (up to 3 retries).
+   - If APPROVED: change is staged in the pending queue.
+8. User sees the Mitigation Proposal in the Crisis Console.
+9. User clicks "Approve & Execute" → staged changes commit to live data.
+10. Transaction is logged in the ledger.
+11. Analyst periodically audits the ledger and adjusts trust scores.
+
+
+FILE STRUCTURE
+--------------
+Main_Product/
+├── app.py                      # Streamlit entry point (900 lines)
+├── generate_test_data.py       # Faker-based test CSV generator
+├── requirements.txt            # Python dependencies
+├── pyproject.toml              # Project metadata
+├── .env                        # API keys (GROQ_API_KEY)
+├── data/
+│   ├── inventory.csv           # Live Master Clipboard
+│   ├── transaction_log.csv     # Historical ledger
+│   └── agent_trust_scores.json # Trust scores for 3 agents
+├── src/
+│   ├── agents/
+│   │   ├── orchestrator.py     # AgentOrchestrator (dispatch + ReAct loop)
+│   │   └── prompts.py          # All system prompts (Maker/Mover/Keeper/Analyst/Scanner)
+│   ├── core/
+│   │   ├── config.py           # Model names, thresholds, file paths
+│   │   ├── sandbox.py          # ShadowSandbox + SandboxResult
+│   │   ├── schema_engine.py    # DynamicSchemaInferencer + SchemaProfile
+│   │   └── state_manager.py    # FactoryDataManager (CRUD + persistence)
+│   └── tools/
+│       └── tool_registry.py    # LangChain tools (query_data, propose_state_change, ask_other_agent)
+└── tests/
+    ├── test_edge_cases.py      # Comprehensive Sandbox + Schema tests
+    └── data/                   # Generated test CSVs for 4 industries
+
+
+ENVIRONMENT VARIABLES
+---------------------
+GROQ_API_KEY    — Required. Groq API key for all LLM calls.
+
+================================================================================

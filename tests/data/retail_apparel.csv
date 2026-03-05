@@ -1,0 +1,101 @@
+sku,brand,clothing_item,category,line,size,colour,material,units_on_floor,stockroom_limit,retail_price_gbp,cost_price_gbp,gross_margin_pct,days_since_last_restock,weekly_sales_velocity,days_of_stock_remaining,store_location
+GLR-TS-OneSize-467,SwiftFit,SwiftFit T-Shirt,T-Shirt,Seasonal Collection,L,Navy,Cashmere Blend,44,72,57.96,21.07,63.6,90,7.2,43.0,Lake Mollymouth
+ATM-JN-XS-678,SwiftFit,SwiftFit T-Shirt,T-Shirt,Men's Athletic,One Size,Ivory,Bamboo Fibre,18,48,45.31,18.7,58.7,72,6.4,20.0,Brownhaven
+ATM-CD-XL-215,FiberEdge,FiberEdge Jacket,Jacket,Seasonal Collection,XS,Forest Green,Gore-Tex,81,120,338.16,120.06,64.5,27,8.4,68.0,Cindyfort
+NVT-JM-OneSize-769,ArcoWear,ArcoWear Swimwear,Swimwear,Women's Formal,S,Forest Green,Organic Hemp,36,48,24.13,10.31,57.3,15,6.6,38.0,Wolfborough
+SFT-JG-OneSize-855,GlacierLine,GlacierLine Jacket,Jacket,Kids' Formal,XXL,Burgundy,Cashmere Blend,22,72,149.46,47.11,68.5,7,4.9,31.0,Andreaport
+FBE-BL-XL-651,TerraCotton,TerraCotton Jeans,Jeans,Kids' Play,M,Charcoal,Bamboo Fibre,41,48,69.01,29.88,56.7,12,1.3,221.0,Gilmorefort
+PRF-TS-M-987,UrbanCraft,UrbanCraft Skirt,Skirt,Kids' Formal,S,Charcoal,Linen Blend,42,96,40.99,17.36,57.6,50,4.3,68.0,North Teresabury
+GLR-SK-M-742,NovaTex,NovaTex Polo Shirt,Polo Shirt,Luxury Evening Wear,L,Sand,Merino Wool,48,72,87.94,37.74,57.1,58,8.1,41.0,West Andrea
+LXB-JK-XS-989,NovaTex,NovaTex Swimwear,Swimwear,Men's Outdoor,One Size,Charcoal,Organic Hemp,26,120,71.11,22.54,68.3,54,7.0,26.0,Davisville
+ATM-BL-M-948,GlacierLine,GlacierLine Blazer,Blazer,Kids' Play,M,Cobalt Blue,Recycled Polyester,63,120,175.28,69.42,60.4,6,0.6,735.0,Valentineberg
+ATM-TS-XS-978,ArcoWear,ArcoWear Jeans,Jeans,Unisex Streetwear,L,Sand,Cashmere Blend,77,96,107.63,35.66,66.9,35,1.0,539.0,Cantuport
+LXB-BL-XS-480,ArcoWear,ArcoWear Skirt,Skirt,Women's Formal,XXL,Navy,Cashmere Blend,61,96,39.59,15.5,60.8,90,1.0,427.0,Robertfort
+SFT-SH-XS-235,AtmosWear,AtmosWear Jacket,Jacket,Men's Athletic,S,Cobalt Blue,100% Cotton,43,96,120.12,51.2,57.4,88,1.3,232.0,Sanchezside
+NVT-JG-L-191,NovaTex,NovaTex Jumper,Jumper,Men's Outdoor,One Size,Arctic White,Gore-Tex,14,48,147.15,60.04,59.2,17,5.5,18.0,South James
+UCR-HD-XL-676,UrbanCraft,UrbanCraft T-Shirt,T-Shirt,Men's Outdoor,XL,Sage,Organic Hemp,35,96,93.57,40.83,56.4,78,5.9,42.0,Port Chad
+SFT-HD-XS-243,PureForm,PureForm Swimwear,Swimwear,Luxury Evening Wear,XS,Terracotta,Gore-Tex,33,48,41.02,15.98,61.0,31,4.8,48.0,Morganhaven
+GLR-JM-XL-391,TerraCotton,TerraCotton Swimwear,Swimwear,Seasonal Collection,XXL,Midnight Black,Linen Blend,39,72,93.52,30.88,67.0,6,6.7,41.0,Loriport
+SFT-SH-L-215,GlacierLine,GlacierLine Joggers,Joggers,Seasonal Collection,L,Sage,Merino Wool,22,24,113.06,34.19,69.8,72,3.7,42.0,Maryshire
+FBE-SK-S-881,ArcoWear,ArcoWear Shorts,Shorts,Men's Athletic,One Size,Arctic White,Merino Wool,17,48,111.87,49.37,55.9,50,4.4,27.0,Grimesmouth
+FBE-PL-L-818,FiberEdge,FiberEdge Polo Shirt,Polo Shirt,Women's Formal,XS,Sage,Recycled Polyester,10,24,68.69,21.61,68.5,19,4.7,15.0,Reedside
+PRF-JK-XXL-881,NovaTex,NovaTex Activewear Top,Activewear Top,Luxury Evening Wear,XXL,Sage,Bamboo Fibre,82,96,40.06,12.88,67.8,55,1.2,478.0,Gibsonmouth
+GLR-JK-XS-416,UrbanCraft,UrbanCraft Skirt,Skirt,Men's Athletic,XXL,Sage,Merino Wool,29,96,16.19,5.9,63.6,44,4.5,45.0,Lake John
+TCN-JN-M-229,TerraCotton,TerraCotton Jumper,Jumper,Men's Athletic,One Size,Rust,Merino Wool,34,48,74.44,21.65,70.9,73,5.4,44.0,Hallchester
+ATM-SH-XL-468,GlacierLine,GlacierLine T-Shirt,T-Shirt,Men's Outdoor,L,Rust,Recycled Polyester,14,36,25.81,9.74,62.3,14,2.1,47.0,West Juliefurt
+FBE-TS-XS-979,ArcoWear,ArcoWear Activewear Top,Activewear Top,Men's Outdoor,XS,Slate Grey,Organic Hemp,48,60,33.79,14.98,55.7,4,4.8,70.0,Mcneilberg
+PRF-JG-M-354,TerraCotton,TerraCotton Polo Shirt,Polo Shirt,Kids' Play,XXL,Burgundy,Merino Wool,13,48,85.7,24.76,71.1,28,6.9,13.0,Hannaberg
+ARW-PL-XS-998,TerraCotton,TerraCotton Shorts,Shorts,Women's Casual,One Size,Forest Green,Gore-Tex,37,72,53.74,17.71,67.0,38,6.3,41.0,Mollymouth
+SFT-SH-M-705,SwiftFit,SwiftFit Shorts,Shorts,Kids' Formal,One Size,Ivory,Linen Blend,19,24,17.51,6.51,62.8,81,7.2,18.0,New Reneetown
+ARW-DR-XS-877,TerraCotton,TerraCotton Skirt,Skirt,Unisex Streetwear,L,Rust,Merino Wool,65,72,59.08,26.2,55.7,18,6.1,75.0,South Monica
+NVT-TS-S-965,LuxeBlend,LuxeBlend Cardigan,Cardigan,Women's Casual,L,Charcoal,Organic Hemp,18,72,60.03,25.18,58.1,9,5.1,25.0,North Terrance
+ARW-PL-XXL-233,LuxeBlend,LuxeBlend Joggers,Joggers,Men's Outdoor,M,Forest Green,Cashmere Blend,24,48,39.53,17.41,56.0,17,6.7,25.0,Matthewfurt
+GLR-HD-S-208,LuxeBlend,LuxeBlend Jeans,Jeans,Women's Casual,L,Sand,Cashmere Blend,33,72,95.89,34.22,64.3,59,2.4,96.0,Port Markside
+NVT-HD-S-926,GlacierLine,GlacierLine Skirt,Skirt,Unisex Streetwear,M,Rust,100% Cotton,90,120,30.57,12.26,59.9,45,3.5,180.0,Finleyfort
+ARW-SK-M-366,PureForm,PureForm Activewear Top,Activewear Top,Seasonal Collection,S,Midnight Black,Organic Hemp,53,96,24.95,7.42,70.3,17,1.2,309.0,New Caseyport
+ARW-JG-S-302,NovaTex,NovaTex Activewear Top,Activewear Top,Women's Casual,L,Burgundy,Bamboo Fibre,23,24,35.76,13.94,61.0,16,1.0,161.0,Lake Christopher
+LXB-HD-XS-572,PureForm,PureForm T-Shirt,T-Shirt,Sustainable Basics,S,Terracotta,Cashmere Blend,11,24,59.8,20.34,66.0,23,2.5,31.0,Port Cynthiaville
+ATM-JN-XS-728,TerraCotton,TerraCotton Jacket,Jacket,Luxury Evening Wear,XL,Slate Grey,Organic Hemp,37,72,108.91,37.59,65.5,53,1.9,136.0,Jacksonport
+FBE-JG-XXL-921,PureForm,PureForm Cardigan,Cardigan,Sustainable Basics,One Size,Midnight Black,Gore-Tex,49,72,91.61,34.46,62.4,41,3.4,101.0,North Markton
+UCR-TS-M-711,TerraCotton,TerraCotton Joggers,Joggers,Sustainable Basics,XS,Ivory,100% Cotton,33,72,76.32,24.39,68.0,20,1.0,231.0,Michaelchester
+SFT-BL-XL-935,SwiftFit,SwiftFit Swimwear,Swimwear,Men's Outdoor,XXL,Midnight Black,Cashmere Blend,112,120,33.24,10.64,68.0,40,6.9,114.0,East Amanda
+LXB-JK-XS-820,GlacierLine,GlacierLine Jumper,Jumper,Kids' Play,M,Terracotta,Recycled Polyester,26,36,152.51,67.86,55.5,69,2.8,65.0,East Gregory
+ATM-TS-XS-157,ArcoWear,ArcoWear Joggers,Joggers,Men's Athletic,XL,Slate Grey,Organic Hemp,39,48,36.15,10.92,69.8,22,7.8,35.0,Harveybury
+LXB-TS-XS-251,NovaTex,NovaTex Jacket,Jacket,Women's Casual,XXL,Navy,Gore-Tex,30,48,304.79,115.71,62.0,43,2.7,78.0,Durhamberg
+UCR-JN-XXL-547,LuxeBlend,LuxeBlend Swimwear,Swimwear,Seasonal Collection,XXL,Sand,Recycled Polyester,75,96,79.44,27.06,65.9,85,5.1,103.0,South Dana
+UCR-PL-M-851,UrbanCraft,UrbanCraft Jumper,Jumper,Kids' Play,M,Navy,100% Cotton,44,60,146.77,55.25,62.4,23,5.2,59.0,Scotttown
+GLR-JG-XXL-679,LuxeBlend,LuxeBlend Hoodie,Hoodie,Unisex Streetwear,L,Navy,Merino Wool,43,48,32.63,14.05,56.9,11,7.0,43.0,Santanaside
+LXB-SH-XS-371,NovaTex,NovaTex Joggers,Joggers,Women's Formal,S,Charcoal,Gore-Tex,33,120,15.13,5.23,65.4,53,8.2,28.0,North Scott
+PRF-SH-L-459,AtmosWear,AtmosWear Cardigan,Cardigan,Kids' Formal,L,Arctic White,Linen Blend,14,60,166.86,55.09,67.0,40,2.4,41.0,Vanessaport
+NVT-HD-M-274,NovaTex,NovaTex Leggings,Leggings,Men's Outdoor,L,Navy,Merino Wool,66,72,87.53,34.99,60.0,55,8.0,58.0,Vaughnmouth
+UCR-JK-L-260,SwiftFit,SwiftFit T-Shirt,T-Shirt,Luxury Evening Wear,XS,Burgundy,Linen Blend,54,96,112.19,41.71,62.8,84,2.5,151.0,Jamesfurt
+SFT-HD-XS-502,AtmosWear,AtmosWear Jacket,Jacket,Men's Athletic,XL,Rust,Recycled Polyester,4,48,108.88,45.74,58.0,80,5.2,5.0,Rodriguezfurt
+SFT-HD-XS-311,NovaTex,NovaTex Jeans,Jeans,Women's Casual,XXL,Forest Green,Organic Hemp,33,48,64.45,27.85,56.8,33,1.0,231.0,Baileyport
+FBE-PL-S-479,UrbanCraft,UrbanCraft Leggings,Leggings,Men's Athletic,L,Burgundy,Organic Hemp,24,48,43.44,18.34,57.8,72,0.7,240.0,Port Dominiqueview
+NVT-HD-XXL-452,GlacierLine,GlacierLine Swimwear,Swimwear,Seasonal Collection,XL,Coral,Linen Blend,17,24,100.93,35.44,64.9,68,5.9,20.0,New Michelleton
+ATM-JK-S-587,ArcoWear,ArcoWear Blazer,Blazer,Women's Casual,XS,Coral,Recycled Polyester,61,120,327.21,100.92,69.2,27,6.9,62.0,Wallport
+UCR-TS-L-180,UrbanCraft,UrbanCraft Skirt,Skirt,Men's Outdoor,L,Slate Grey,Bamboo Fibre,77,96,22.04,7.63,65.4,50,4.8,112.0,New Laurie
+TCN-CD-L-994,GlacierLine,GlacierLine T-Shirt,T-Shirt,Women's Casual,One Size,Charcoal,Cashmere Blend,18,60,74.49,28.24,62.1,12,7.9,16.0,Lake James
+GLR-HD-OneSize-392,PureForm,PureForm Activewear Top,Activewear Top,Luxury Evening Wear,XL,Burgundy,Bamboo Fibre,50,96,78.94,22.61,71.4,35,3.5,100.0,Ericaberg
+GLR-JK-XXL-810,LuxeBlend,LuxeBlend Polo Shirt,Polo Shirt,Men's Athletic,XS,Coral,Linen Blend,50,96,43.2,14.83,65.7,43,7.0,50.0,Lake Debbieport
+TCN-BL-M-963,NovaTex,NovaTex Shorts,Shorts,Kids' Formal,One Size,Charcoal,Linen Blend,42,48,61.53,25.87,58.0,34,6.2,47.0,Johnsonstad
+GLR-SK-XS-292,PureForm,PureForm Shorts,Shorts,Seasonal Collection,S,Rust,Organic Hemp,56,120,20.9,8.66,58.6,8,2.8,140.0,North Renee
+FBE-PL-S-899,ArcoWear,ArcoWear Activewear Top,Activewear Top,Unisex Streetwear,XL,Terracotta,Recycled Polyester,43,120,21.05,6.01,71.4,6,7.8,39.0,Julieburgh
+SFT-BL-M-943,NovaTex,NovaTex Shorts,Shorts,Unisex Streetwear,XL,Coral,100% Cotton,25,48,61.84,27.41,55.7,60,5.1,34.0,East Kristin
+LXB-DR-S-957,NovaTex,NovaTex Leggings,Leggings,Men's Athletic,M,Charcoal,Bamboo Fibre,12,60,84.77,34.97,58.7,27,7.3,12.0,Alyssaview
+SFT-SK-S-375,ArcoWear,ArcoWear Skirt,Skirt,Sustainable Basics,L,Cobalt Blue,100% Cotton,22,36,78.12,21.99,71.9,32,5.2,30.0,West Robin
+TCN-JM-XXL-758,LuxeBlend,LuxeBlend Blazer,Blazer,Women's Formal,L,Coral,Organic Hemp,18,36,258.98,108.81,58.0,50,5.1,25.0,Coffeyport
+ARW-CD-XXL-963,GlacierLine,GlacierLine Activewear Top,Activewear Top,Women's Formal,M,Cobalt Blue,Bamboo Fibre,26,96,21.7,9.72,55.2,81,2.9,63.0,Lindamouth
+TCN-BL-XXL-828,SwiftFit,SwiftFit Leggings,Leggings,Seasonal Collection,XXL,Forest Green,Recycled Polyester,46,120,28.97,12.33,57.4,76,3.6,89.0,East Karenbury
+LXB-SK-S-838,TerraCotton,TerraCotton T-Shirt,T-Shirt,Luxury Evening Wear,XXL,Sand,Bamboo Fibre,28,60,18.71,7.49,60.0,73,7.0,28.0,Coffeyside
+LXB-JM-XXL-327,AtmosWear,AtmosWear Skirt,Skirt,Seasonal Collection,XL,Sage,Gore-Tex,35,48,103.27,44.3,57.1,23,2.6,94.0,Christopherfurt
+ATM-JN-XXL-364,UrbanCraft,UrbanCraft Jumper,Jumper,Women's Casual,One Size,Cobalt Blue,Gore-Tex,16,36,142.91,47.48,66.8,42,3.3,34.0,West Amandamouth
+GLR-BL-L-971,GlacierLine,GlacierLine Hoodie,Hoodie,Sustainable Basics,L,Midnight Black,Merino Wool,19,36,106.09,36.59,65.5,38,3.6,37.0,Emilyview
+UCR-JN-S-450,UrbanCraft,UrbanCraft Polo Shirt,Polo Shirt,Kids' Formal,XL,Sand,Gore-Tex,29,120,49.93,22.36,55.2,40,5.5,37.0,Carsonstad
+ARW-SH-M-314,GlacierLine,GlacierLine Swimwear,Swimwear,Sustainable Basics,One Size,Navy,Recycled Polyester,81,120,24.24,9.32,61.6,81,3.8,149.0,Lake Jesustown
+PRF-SH-L-104,LuxeBlend,LuxeBlend T-Shirt,T-Shirt,Men's Outdoor,XL,Slate Grey,100% Cotton,87,120,35.01,13.83,60.5,80,6.3,97.0,Rosebury
+SFT-JM-M-419,FiberEdge,FiberEdge Jeans,Jeans,Kids' Formal,XS,Coral,Bamboo Fibre,17,24,46.31,15.26,67.0,66,5.1,23.0,Lake Madisonport
+LXB-PL-XXL-237,SwiftFit,SwiftFit Dress,Dress,Luxury Evening Wear,L,Burgundy,Recycled Polyester,9,24,215.88,65.26,69.8,2,5.1,12.0,Wilsonton
+UCR-HD-M-828,PureForm,PureForm Skirt,Skirt,Seasonal Collection,One Size,Midnight Black,Bamboo Fibre,14,72,119.44,46.88,60.8,83,7.1,14.0,West Wendyville
+ARW-JM-XS-526,FiberEdge,FiberEdge Shorts,Shorts,Sustainable Basics,L,Arctic White,Bamboo Fibre,30,96,88.0,34.07,61.3,38,3.7,57.0,East Paigeberg
+NVT-SK-XL-376,UrbanCraft,UrbanCraft Jacket,Jacket,Women's Casual,XL,Charcoal,Cashmere Blend,47,72,119.15,35.67,70.1,13,4.3,77.0,Chavezside
+GLR-JG-OneSize-369,LuxeBlend,LuxeBlend Activewear Top,Activewear Top,Women's Formal,XL,Slate Grey,Cashmere Blend,6,36,67.12,21.16,68.5,61,2.9,14.0,Matthewsberg
+ARW-TS-XXL-191,GlacierLine,GlacierLine Leggings,Leggings,Kids' Formal,XS,Rust,Organic Hemp,16,24,30.25,12.19,59.7,32,5.5,20.0,Penafort
+ATM-BL-M-575,UrbanCraft,UrbanCraft T-Shirt,T-Shirt,Women's Formal,XS,Rust,100% Cotton,34,48,47.83,19.4,59.4,12,7.3,33.0,Crosbyview
+ARW-TS-OneSize-241,LuxeBlend,LuxeBlend Skirt,Skirt,Sustainable Basics,XXL,Navy,Gore-Tex,29,72,91.97,31.58,65.7,43,1.7,119.0,Lake Mitchellmouth
+PRF-PL-L-378,AtmosWear,AtmosWear Activewear Top,Activewear Top,Kids' Formal,L,Charcoal,Cashmere Blend,7,24,91.27,40.79,55.3,20,1.1,45.0,Sampsonstad
+GLR-SH-OneSize-682,GlacierLine,GlacierLine Skirt,Skirt,Men's Outdoor,L,Navy,Cashmere Blend,12,72,86.87,36.71,57.7,16,4.2,20.0,Lake Michaelstad
+ATM-HD-L-551,LuxeBlend,LuxeBlend T-Shirt,T-Shirt,Seasonal Collection,XS,Forest Green,100% Cotton,80,120,91.0,28.95,68.2,85,7.4,76.0,South Joshuaville
+FBE-CD-XXL-817,SwiftFit,SwiftFit Jacket,Jacket,Men's Outdoor,XS,Coral,Organic Hemp,60,96,210.24,88.85,57.7,71,7.6,55.0,Davisborough
+GLR-TS-XS-758,AtmosWear,AtmosWear Leggings,Leggings,Kids' Formal,S,Cobalt Blue,Organic Hemp,16,24,47.44,15.95,66.4,35,0.6,187.0,North Kristinbury
+SFT-CD-XXL-487,NovaTex,NovaTex Polo Shirt,Polo Shirt,Sustainable Basics,One Size,Slate Grey,Organic Hemp,68,120,24.24,8.84,63.5,40,1.2,397.0,Port Anne
+ATM-JM-XXL-118,ArcoWear,ArcoWear Hoodie,Hoodie,Women's Casual,L,Coral,100% Cotton,70,120,80.0,26.54,66.8,65,4.9,100.0,Port Kathyborough
+ATM-DR-M-945,AtmosWear,AtmosWear T-Shirt,T-Shirt,Seasonal Collection,One Size,Slate Grey,Gore-Tex,71,120,64.68,25.34,60.8,57,1.1,452.0,Port Molly
+SFT-TS-M-463,TerraCotton,TerraCotton Activewear Top,Activewear Top,Women's Casual,XXL,Ivory,Gore-Tex,18,24,66.7,27.99,58.0,52,1.1,115.0,Kimtown
+GLR-JG-S-223,SwiftFit,SwiftFit Leggings,Leggings,Unisex Streetwear,One Size,Coral,Organic Hemp,43,96,78.0,22.46,71.2,81,7.2,42.0,Micheleberg
+GLR-HD-OneSize-561,FiberEdge,FiberEdge Shorts,Shorts,Sustainable Basics,XXL,Terracotta,Recycled Polyester,13,24,20.1,8.82,56.1,74,4.2,22.0,New John
+FBE-JN-XXL-692,UrbanCraft,UrbanCraft Jeans,Jeans,Luxury Evening Wear,XXL,Rust,Merino Wool,56,96,107.68,39.38,63.4,49,3.7,106.0,North Donna
+GLR-JM-OneSize-354,TerraCotton,TerraCotton Blazer,Blazer,Kids' Formal,L,Burgundy,Organic Hemp,17,36,264.7,107.79,59.3,38,7.2,17.0,East Alexisbury
+FBE-DR-XXL-854,SwiftFit,SwiftFit Leggings,Leggings,Unisex Streetwear,XL,Sage,Linen Blend,46,72,73.06,31.9,56.3,16,8.3,39.0,Alfredview
+UCR-CD-XL-810,NovaTex,NovaTex Skirt,Skirt,Seasonal Collection,M,Charcoal,Gore-Tex,34,60,113.98,45.67,59.9,86,6.4,37.0,East Judyhaven
+FBE-BL-OneSize-532,NovaTex,NovaTex Swimwear,Swimwear,Luxury Evening Wear,XS,Cobalt Blue,100% Cotton,7,36,20.94,6.81,67.5,20,8.4,6.0,Lake Brycemouth
