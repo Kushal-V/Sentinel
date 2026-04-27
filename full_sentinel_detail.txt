@@ -1,0 +1,957 @@
+================================================================================
+                 SENTINEL — SUPPLY CHAIN DIGITAL TWIN
+              FULL IN-DEPTH PROJECT DESCRIPTION DOCUMENT
+================================================================================
+
+Project Name   : Sentinel
+Version        : 1.0.0
+Language       : Python >= 3.11
+Framework      : Streamlit (frontend), LangChain (agent orchestration), Groq (LLM inference)
+Package Manager: uv (pyproject.toml)
+License        : Private/Academic
+
+================================================================================
+ 1. PROJECT OVERVIEW
+================================================================================
+
+Sentinel is a Supply Chain Digital Twin — a multi-agent LLM orchestration
+system that uses specialist AI agents to respond to supply chain crises in
+real time. It combines:
+
+  - Three persona-driven specialist agents (Maker, Mover, Keeper)
+  - A structured-output Dispatcher that routes crises to the right agent
+  - A Shadow Sandbox ("Imagination Room") that prevents hallucinated state
+    changes from corrupting live data
+  - A Retrospective Weighting system (trust scores) that dynamically adjusts
+    agent routing over time based on past performance
+  - A Two-Phase Commit protocol with Human-in-the-Loop (HITL) approval
+  - A Dynamic Schema Inference Engine for multi-tenancy across any industry
+
+The system is designed to be domain-agnostic: the same engine works for toy
+factories, hospitals, shipping fleets, server farms, pharmaceutical warehouses,
+electronics manufacturing, food cold chains, automotive parts, and retail
+apparel — all without code changes.
+
+================================================================================
+ 2. NOVELTY CLAIMS
+================================================================================
+
+CLAIM A — Shadow Sandbox (Hallucination Guard)
+----------------------------------------------
+Every proposed state change from an LLM agent is validated inside an isolated,
+deep-copied DataFrame clone before any live data is touched. The sandbox
+enforces two classes of constraints:
+
+  (i)  Universal floor: no physical quantity can go below zero
+  (ii) Dynamic ceiling: mutable columns cannot exceed their inferred limit
+       column (e.g., current_stock <= max_capacity)
+
+If a proposal violates any constraint, the sandbox returns a detailed rejection
+message including the exact violated constraint, the numeric values, and the
+maximum allowable change — enabling the LLM to self-correct.
+
+CLAIM B — Retrospective Weighting (Trust Override)
+---------------------------------------------------
+After the LLM Dispatcher selects an agent, the orchestrator reads live trust
+scores from persistent storage. If the chosen agent's trust score falls below
+the ROUTING_THRESHOLD (default 0.50), the routing decision is programmatically
+overridden to the agent's configured fallback. This override is:
+
+  - Deterministic (not LLM-dependent)
+  - Auditable (original_llm_choice is preserved)
+  - Adaptive (the Analyst agent periodically reviews the transaction ledger
+    and adjusts trust scores based on financial outcomes)
+
+================================================================================
+ 3. TECHNOLOGY STACK
+================================================================================
+
+Core Runtime:
+  - Python >= 3.11
+  - Streamlit >= 1.32.0 (interactive web dashboard)
+  - Pandas >= 2.2.0 (data manipulation and CSV I/O)
+  - Pydantic >= 2.6.0 (data validation, structured output schemas)
+
+LLM Infrastructure:
+  - LangChain >= 0.2.0 (agent framework, tool binding, message types)
+  - LangChain-Core >= 0.2.0 (base message classes, RunnableConfig)
+  - LangChain-Groq >= 1.1.2 (ChatGroq client for Groq cloud inference)
+  - Groq Cloud API (free-tier LLM inference)
+
+LLM Models Used:
+  - Dispatcher: llama-3.1-8b-instant (8B params, ~600 tok/s on Groq)
+    -> Small, fast, strict JSON mode for routing decisions
+    -> Temperature: 0 (deterministic)
+  - Specialist: llama-3.3-70b-versatile (70B params)
+    -> High reasoning capability for ReAct tool-calling loops
+    -> Temperature: 0.2 (slight creativity for mitigation proposals)
+  - Analyst: llama-3.3-70b-versatile (70B params)
+    -> Large context window for reading full transaction CSV logs
+    -> Temperature: 0 (deterministic trust evaluation)
+
+Visualization & Utilities:
+  - Plotly >= 5.20.0 (interactive charts)
+  - Faker >= 4.0.0 (mock data generation)
+  - python-dotenv >= 1.0.0 (environment variable management)
+
+Development:
+  - pytest >= 8.0.0 (test framework)
+  - pytest-cov >= 4.1.0 (coverage reporting)
+
+================================================================================
+ 4. ARCHITECTURE
+================================================================================
+
+4.1 Core Pipeline Flow
+----------------------
+
+  [1] Crisis Event arrives
+      (user-triggered via preset/custom text, or auto-detected by Scanner)
+          |
+          v
+  [2] Dispatcher (Groq, llama-3.1-8b-instant)
+      - Classifies crisis type (production/logistics/inventory)
+      - Routes via with_structured_output(DispatchRoute)
+      - Outputs strict JSON — no free-text allowed
+          |
+          v
+  [3] Trust Override Check (Claim B)
+      - Reads agent trust scores from FactoryDataManager
+      - If chosen agent score < ROUTING_THRESHOLD (0.50):
+        -> Override to preferred_fallback agent
+        -> Set trust_override_applied = True
+        -> Preserve original_llm_choice for audit
+          |
+          v
+  [4] Specialist Agent (Groq, llama-3.3-70b-versatile)
+      - Manual ReAct tool-calling loop (not create_react_agent)
+      - Up to 10 iterations of think → tool_call → observe → think
+      - XML <function=...> error recovery for Groq/Llama bug
+          |
+          v
+  [5] Shadow Sandbox Validation (Claim A)
+      - Every propose_state_change goes through ShadowSandbox
+      - Deep-copied DataFrame clone prevents live data corruption
+      - Checks: floor >= 0, ceiling <= inferred limit column
+      - Returns SAFE or REJECTED with detailed explanation
+          |
+          v
+  [6] Two-Phase Commit (HITL Approval)
+      - SAFE proposals are STAGED in pending_changes list
+      - Changes are NOT committed until human clicks "Approve & Execute"
+      - On approval: re-validates each change against CURRENT state
+        (guards against stale deltas)
+      - On rejection: all staged changes discarded
+          |
+          v
+  [7] Analyst (Trust Score Updater)
+      - Reviews transaction_log.csv for financial outcomes
+      - Applies trust score deltas based on evaluation criteria
+      - Clamped to [-0.15, +0.15] per evaluation
+      - Updates agent_trust_scores.json
+
+4.2 Module Dependency Graph
+---------------------------
+
+  app.py (Streamlit entry point)
+    |-- src/agents/orchestrator.py (AgentOrchestrator)
+    |     |-- src/agents/prompts.py (system prompts for all agents)
+    |     |-- src/tools/tool_registry.py (LangChain @tool functions)
+    |     |     |-- src/core/sandbox.py (ShadowSandbox)
+    |     |     |     |-- src/core/schema_engine.py (DynamicSchemaInferencer)
+    |     |     |-- src/core/state_manager.py (FactoryDataManager)
+    |     |           |-- src/core/config.py (global constants)
+    |     |           |-- src/core/schema_engine.py
+    |     |-- src/core/state_manager.py
+    |     |-- src/core/config.py
+    |-- src/core/state_manager.py
+    |-- src/tools/tool_registry.py
+
+================================================================================
+ 5. FILE-BY-FILE DESCRIPTION
+================================================================================
+
+5.1 app.py — Streamlit Dashboard (Entry Point)
+-----------------------------------------------
+Lines: ~900+
+Command: streamlit run app.py
+
+Responsibilities:
+  - Page configuration (title, icon, layout)
+  - Custom CSS for dark-mode-friendly styling (gradient header, trust bars,
+    message bubbles for human/agent/system/tool, approve button)
+  - Mock crisis presets (Port Strike, Machine Breakdown, Warehouse Overflow,
+    Demand Spike)
+  - Session state initialisation (_init_session_state):
+    - active_workspace, manager (FactoryDataManager), orchestrator (lazy),
+      chat_history, agent_steps, pending_proposal, pending_route,
+      pending_crisis, schema_profile_summary, suggested_crises, crisis_running
+  - Lazy orchestrator creation with API key validation
+  - Tool registry sync: set_data_manager(ss.manager) on every rerun
+  - Workspace management UI (create, switch, delete, rename workspaces)
+  - CSV upload (replaces inventory, rebuilds manager, resets trust/log)
+  - Sidebar: inventory summary, trust score display, data visualisations
+  - Tab layout:
+    (1) Crisis Console — trigger crises, view agent reasoning in real-time,
+        HITL approve/reject, analyst review
+    (2) Inventory — live inventory table, edit capabilities
+    (3) Transaction Log — full audit ledger view
+    (4) Schema Inspector — inferred schema profile display
+  - Scanner integration: auto-scan CSV for potential crises per agent persona
+  - Chat-style rendering of agent steps (tool calls, results, final answers)
+  - Informational query mode (ask questions without triggering crises)
+
+5.2 src/agents/orchestrator.py — AgentOrchestrator
+----------------------------------------------------
+Lines: ~835
+
+Classes:
+  - DispatchRoute (Pydantic BaseModel)
+    Fields: selected_agent, delegation_justification, urgency_tier,
+            required_lookups, trust_override_applied, original_llm_choice
+  - CrisisEvent (Pydantic BaseModel)
+    Fields: event_id, event_type, severity, description, affected_entities
+  - ScannerResult (Pydantic BaseModel)
+    Fields: crises (list[CrisisEvent])
+  - AgentOrchestrator
+    Holds three ChatGroq LLM clients and implements:
+    - dispatch(crisis) — structured routing with trust override
+    - run_specialist(route, crisis, chat_history) — manual ReAct loop generator
+    - answer_query(query, chat_history) — informational queries (no state mutation)
+    - run_analyst(chat_history) — trust score evaluation from transaction log
+    - scan_for_crises() — multi-persona CSV risk scanner
+
+Key Design Decisions:
+  - Manual ReAct loop instead of create_react_agent (Groq compatibility)
+  - XML <function=...> error recovery via parse_groq_xml_tool_call
+  - Qwen3 <think>...</think> tag stripping for reasoning model compatibility
+  - Structured content block handling (list-type AI message content)
+  - Scanner runs per agent persona (Maker/Mover/Keeper focus areas)
+
+5.3 src/agents/prompts.py — System Prompt Repository
+------------------------------------------------------
+Lines: ~294
+
+Contains 7 system prompts:
+  1. DISPATCHER_SYSTEM_PROMPT
+     - Pure routing intelligence, strict JSON output
+     - Routing rules for maker/mover/keeper domain mapping
+     - Explicitly told NOT to handle trust overrides itself
+
+  2. MAKER_SYSTEM_PROMPT
+     - Persona: analytical production engineer
+     - Focus: throughput, capacity utilisation, lead times
+     - Mandatory tool call order enforced in prompt text
+     - Sandbox directive explained (non-negotiable)
+     - Inter-agent consultation via ask_other_agent
+     - Mitigation Proposal format template (ACTIONS, FINANCIAL IMPACT,
+       RATIONALE, SUGGESTIONS, EMAIL DRAFT)
+
+  3. MOVER_SYSTEM_PROMPT
+     - Persona: logistics & distribution head
+     - Focus: delivery speed, on-time performance, cost efficiency
+     - Financial constraint: cost must not exceed benefit
+     - Same tool call order and sandbox directives
+
+  4. KEEPER_SYSTEM_PROMPT
+     - Persona: inventory & capacity manager
+     - Focus: waste reduction, over-stocking prevention, capacity tracking
+     - Core duty: space-optimised reallocation
+     - Rule: never move stock to >80% capacity without clearance action
+
+  5. ANALYST_SYSTEM_PROMPT
+     - Persona: cold, data-driven mathematician
+     - Evaluation criteria: financial impact vs baseline, sandbox rejections
+     - Output format: AGENT, DECISIONS REVIEWED, NET FINANCIAL IMPACT,
+       TRUST SCORE DELTA, REASONING
+
+  6. INFO_QUERY_SYSTEM_PROMPT
+     - Neutral data assistant for informational queries
+     - No state changes, no crisis fabrication
+     - Factual data retrieval only
+
+  7. SCANNER_SYSTEM_PROMPT
+     - Risk detection pipeline for auto-scanning datasets
+     - Template with {agent_role} and {agent_focus} placeholders
+     - Strict grounding rules: only reference real data values
+     - Maximum 2 crises per agent perspective
+
+All prompts explicitly state:
+  - "CRITICAL: You MUST use native JSON tool calls. NEVER emit XML tool tags."
+  - Mandatory tool call order: get_dataset_schema → query_data → propose_state_change
+
+5.4 src/core/schema_engine.py — Dynamic Schema Inference Engine
+----------------------------------------------------------------
+Lines: ~537
+
+Classes:
+  - ConstraintRule (frozen dataclass)
+    Fields: mutable_column, limit_column, min_value (always 0.0)
+  - SchemaProfile (dataclass)
+    Fields: primary_key_column, numeric_columns, constraint_rules,
+            column_dtypes, unconstrained_numeric_columns
+    Method: as_agent_summary() — LLM-readable schema string
+  - DynamicSchemaInferencer
+    Takes any pandas DataFrame and extracts structural rules
+
+Algorithm (3-phase):
+
+  Phase 1: Primary Key Detection
+    - Regex patterns tried in priority order:
+      \bid\b, \bkey\b, \bsku\b, \bref\b, \bcode\b, \bname\b, \bslug\b
+    - Fallback: first non-numeric column
+    - Last resort: first column
+
+  Phase 2: Constraint Pair Detection (same-stem matching)
+    - For each numeric column, extract its stem:
+      "current_stock" → "stock", "beds_occupied" → "beds",
+      "active_compute_tb" → "compute"
+    - Try each stem against _LIMIT_SUFFIX_PATTERNS:
+      max_{stem}, {stem}_max, max_{stem}_{suffix},
+      {stem}_{limit|cap|capacity|ceiling|total|size|maximum|upper|allowance}
+    - First match wins; column pairs are recorded as ConstraintRules
+
+  Phase 3: Cross-Stem Pair Detection (data-driven validation)
+    - For unmatched columns: identify limit-looking columns via regex
+    - For each candidate pair, compute the fraction of rows where
+      mutable_value <= limit_value
+    - If fraction >= 0.75 (_CROSS_STEM_MIN_RATIO), record the pair
+    - Handles cases like containers_loaded/teu_limit, units_on_floor/stockroom_limit
+
+Stem Extraction:
+  - Strips prefixes: currently, current, curr, used, occupied, in_use, active
+  - Strips suffixes: level, used, occupied, in_use, on_hand, qty, quantity,
+    count, loaded, admitted, _tb, _gb, _kb
+  - Skips columns that look like limits themselves (max_, _capacity, etc.)
+
+5.5 src/core/sandbox.py — Shadow Sandbox (Claim A)
+----------------------------------------------------
+Lines: ~362
+
+Classes:
+  - SandboxResult (dataclass)
+    Fields: status ("SAFE"/"REJECTED"), validated_state, rejection_reason,
+            proposed_value, current_value, limit_value
+  - ShadowSandbox
+    Attributes: _shadow_df (deep copy), _profile (SchemaProfile)
+
+evaluate_proposal(row_primary_key, target_column, delta) pipeline:
+
+  Stage 1: Input validation
+    - Row exists? (checks primary key column)
+    - Column exists?
+    - Column is numeric?
+    - Current value is not NaN?
+    → Rejection with valid keys/columns listed
+
+  Stage 2: Apply delta to fresh clone (never mutate _shadow_df)
+    - current_value + delta = proposed_value
+
+  Stage 3: Universal floor constraint
+    - If proposed_value < 0 → REJECTED
+    - Message includes: delta, current, proposed, "minimum allowed = 0"
+
+  Stage 4: Dynamic upper-bound constraint
+    - Find applicable ConstraintRule for target_column
+    - If limit column exists and proposed_value > limit_value → REJECTED
+    - Message includes: delta, current, proposed, limit_column name, limit_value,
+      maximum allowable increase
+
+  Stage 5: All passed → SAFE
+    - Apply delta to sandbox copy
+    - Return validated snapshot DataFrame
+
+Thread Safety:
+  - Each evaluate_proposal operates on a freshly-cloned copy
+  - Stateless across calls — concurrent Streamlit callbacks cannot interfere
+
+5.6 src/core/state_manager.py — FactoryDataManager
+-----------------------------------------------------
+Lines: ~810
+
+The single source of truth for ALL runtime state. Agents NEVER hold state
+internally.
+
+Manages three persistent artifacts per workspace:
+  1. inventory.csv — real-time stock levels with capacity limits
+  2. transaction_log.csv — append-only audit ledger
+  3. agent_trust_scores.json — per-agent routing weights
+
+Workspace Architecture:
+  - Root: data/workspaces/{workspace_name}/
+  - Each workspace is an isolated directory with its own data files
+  - Default workspace: "default"
+  - Workspace names validated against path traversal (../ blocked)
+
+Cold-Start Mock Data:
+  - 7-row toy factory inventory if inventory.csv missing
+  - Items: Plastic Resin, Microchip, Packaging, Paint Pigment, WIP Body Frame,
+    Deluxe Toy, Basic Toy
+  - Columns: item_id, item_type, location_id, current_stock, max_capacity,
+    unit_cost_usd
+
+Thread Safety:
+  - All write operations guarded by threading.Lock
+  - Atomic writes via temp file + rename pattern (.csv.tmp → .csv)
+
+Key Methods:
+  - get_inventory() → deep copy of live DataFrame
+  - get_schema_profile() → cached SchemaProfile (invalidated on data change)
+  - get_item(item_id) → single row as dict
+  - update_inventory(item_id, target_column, quantity_change) → schema-aware update
+  - log_transaction(event_id, agent_id, action_schema, financial_impact, sandbox_approved)
+  - update_trust_score(agent_id, score_delta) → clamped to [0.0, 1.0]
+  - reset_for_new_dataset() → clear trust scores, transaction log, pending changes
+  - save_metadata() → workspace metadata JSON
+  - list_workspaces() → all workspace names
+  - delete_workspace(name) → remove workspace directory
+  - update_inventory_data(new_df) → bulk replace inventory
+
+Transaction Log Schema:
+  - transaction_id: UUID
+  - timestamp: ISO 8601 UTC
+  - event_id: crisis event or "AGENT_ACTION" / "SANDBOX_REJECTION"
+  - agent_id: maker/mover/keeper/unknown
+  - action_schema: JSON string with row_key, target_column, delta, justification
+  - financial_impact: float (USD)
+  - sandbox_approved: bool
+
+Trust Score Schema:
+  - global_metrics:
+    - routing_threshold: 0.50
+    - last_analysis_run: ISO timestamp
+  - agents:
+    - {agent_id}:
+      - trust_score: float [0.0, 1.0] (default 0.95)
+      - total_decisions: int
+      - recent_penalties: int
+      - preferred_fallback: str
+
+5.7 src/tools/tool_registry.py — LangChain Tool Registry
+----------------------------------------------------------
+Lines: ~785
+
+Singleton Pattern:
+  - _data_manager module-level reference
+  - set_data_manager(dm) / get_data_manager() for session sync
+  - app.py calls set_data_manager(ss.manager) on every Streamlit rerun
+
+Tool 1: get_dataset_schema()
+  - MUST be called first by every agent
+  - Returns SchemaProfile.as_agent_summary() plus:
+    - All primary key values (up to 60)
+    - Categorical column sample values (up to 15 per column)
+    - First 3 sample rows
+  - Enables agents to learn column names dynamically
+
+Tool 2: query_data(search_term)
+  - Case-insensitive substring search across ALL string/object columns
+  - Fallback: splits multi-word searches into individual words
+  - Returns matched rows as JSON list of dicts
+  - If no matches: lists all available primary key values
+
+Tool 3: propose_state_change(row_key, target_column, delta, justification)
+  - The ONLY tool that can mutate live data
+  - 4-stage pipeline:
+    (1) Column validation (exists? numeric?)
+    (2) Shadow Sandbox evaluation
+    (3) Stage for HITL approval (append to pending_changes)
+    (4) Audit logging (rejections logged for Analyst review)
+  - Financial impact estimation via unit_cost column detection
+  - Returns JSON on SAFE: status, row_key, column, old_value, new_value,
+    delta, limit_value, justification, financial_impact_usd
+  - Returns rejection text on REJECTED
+
+Tool 4: ask_other_agent(target_agent, question)
+  - Inter-agent communication for cross-domain actions
+  - Creates a temporary ChatGroq client with llama-3.1-8b-instant
+  - Sub-agent gets CONSULTATIVE override (no propose_state_change)
+  - Sub-agent can only use get_dataset_schema and query_data
+  - Runs a 5-iteration ReAct loop for the consultation
+  - Returns text recommendation (Yes/No with justification)
+
+Two-Phase Commit Functions:
+  - commit_pending_changes() → re-validates each staged change against
+    CURRENT state, applies valid ones, logs transactions, keeps failed ones
+  - discard_pending_changes() → clears all staged changes
+
+Groq XML Recovery:
+  - parse_groq_xml_tool_call(error_str) → extracts tool name + args from
+    Groq/Llama <function=name>args</function> XML error format
+  - Fallback heuristic for kwarg-style strings
+
+Exported Registries:
+  - SENTINEL_TOOLS = [get_dataset_schema, query_data, propose_state_change, ask_other_agent]
+  - INFO_TOOLS = [get_dataset_schema, query_data] (read-only for informational queries)
+
+5.8 src/core/config.py — Global Configuration
+-----------------------------------------------
+Lines: ~102
+
+Constants:
+  - PROJECT_ROOT, DATA_DIR, WORKSPACES_DIR, DEFAULT_WORKSPACE
+  - ROUTING_THRESHOLD: 0.50 (minimum trust score for routing)
+  - DEFAULT_TRUST_SCORE: 0.95
+  - MIN_TRUST_SCORE: 0.0, MAX_TRUST_SCORE: 1.0
+  - MAX_SINGLE_TRANSACTION_USD: 100,000
+  - FINANCIAL_PENALTY_FACTOR: 1.5
+  - SANDBOX_MAX_RETRIES: 3
+  - DISPATCHER_MODEL: "llama-3.1-8b-instant"
+  - SPECIALIST_MODEL: "llama-3.3-70b-versatile"
+  - ANALYST_MODEL: "llama-3.3-70b-versatile"
+  - AGENT_IDS: ("maker", "mover", "keeper")
+  - AGENT_FALLBACKS: {"maker": "mover", "mover": "keeper", "keeper": "maker"}
+
+================================================================================
+ 6. AGENT SYSTEM DESIGN
+================================================================================
+
+6.1 Agent Personas
+-------------------
+
+MAKER (Chief Production & Supply Specialist)
+  Domain: Manufacturing, production bottlenecks, raw material shortages,
+          equipment failures, supply-side problems
+  Fallback: Mover
+  Personality: Analytical production engineer focused on throughput
+
+MOVER (Head of Logistics & Distribution)
+  Domain: Shipping delays, port strikes, transport disruptions, route changes,
+          freight cost spikes, delivery failures
+  Fallback: Keeper
+  Personality: Speed-obsessed logistics expert focused on lead-days and cost
+
+KEEPER (Inventory & Capacity Manager)
+  Domain: Warehouse overflow, storage capacity warnings, inventory holding costs,
+          stock discrepancies, reallocation needs
+  Fallback: Maker
+  Personality: Methodical, stingy, hates waste and over-stocking
+
+ANALYST (Performance Intelligence Layer)
+  Domain: Trust score evaluation, financial outcome review
+  No tools: reads transaction ledger directly in prompt context
+  Personality: Cold, data-driven mathematician with no loyalty to any agent
+
+SCANNER (Risk Detection Pipeline)
+  Domain: Proactive crisis detection from inventory data
+  Runs per agent persona (Maker/Mover/Keeper perspectives)
+  Output: Structured ScannerResult with list of CrisisEvent objects
+
+6.2 Agent Tool Call Contract
+-----------------------------
+All agents MUST follow this mandatory order (enforced by prompts):
+
+  Step 1: get_dataset_schema()
+    → Learn column names (they vary per tenant/dataset)
+
+  Step 2: query_data(search_term)
+    → Read current values before proposing changes
+
+  Step 3: propose_state_change(row_key, target_column, delta, justification)
+    → Sandbox-gated, stages for HITL approval
+    → If REJECTED: read rejection reason, recalculate, retry (up to 3 times)
+
+  Optional: ask_other_agent(target, question)
+    → Cross-domain consultation before acting
+
+6.3 ReAct Tool Loop Implementation
+------------------------------------
+Instead of LangChain's create_react_agent (which breaks on Groq), the
+orchestrator implements a manual ReAct loop:
+
+  1. Build message list: SystemMessage + chat_history + HumanMessage
+  2. Call llm_with_tools.invoke(messages) → AIMessage
+  3. If AIMessage has tool_calls:
+     a. Execute each tool via tool_map
+     b. Append ToolMessage results to message list
+     c. Yield step dicts for UI rendering
+     d. Continue to next iteration
+  4. If no tool_calls: this is the final answer → yield and break
+  5. Maximum 10 iterations to prevent infinite loops
+
+Error Recovery:
+  - Groq/Llama XML bug: parse <function=name>args</function> from error string
+  - Qwen3 reasoning: strip <think>...</think> blocks from content
+  - Structured content blocks: extract text from dict/list message content
+
+6.4 Mitigation Proposal Format
+-------------------------------
+All specialist agents must produce final answers in this format:
+
+  --- MITIGATION PROPOSAL ---
+  AGENT: [Maker/Mover/Keeper]
+  CRISIS: [1-line summary]
+
+  ACTIONS TAKEN:
+    - [SKU/Item]: [column] changed from [old] → [new] ([delta]) — [reason]
+
+  FINANCIAL IMPACT: [estimated cost/saving in USD]
+
+  RATIONALE: [2-3 sentences with domain reasoning and actual numbers]
+
+  SUGGESTIONS FOR THE OPERATOR:
+    1. [Actionable recommendation]
+    2. [Alternative approach]
+    3. [Monitoring/follow-up needed]
+
+  RECOMMENDED EMAIL DRAFT:
+  Subject: [Crisis Type] — Mitigation Plan Requires Approval
+  [professional 3-4 line email]
+  --- END PROPOSAL ---
+
+================================================================================
+ 7. MULTI-TENANCY VIA SCHEMA INFERENCE
+================================================================================
+
+The DynamicSchemaInferencer makes Sentinel work with any CSV dataset without
+code changes. It has been tested across 5+ industry domains:
+
+Domain                | Primary Key   | Mutable Column        | Limit Column
+--------------------- | ------------- | --------------------- | ---------------------
+Toy Factory           | item_id       | current_stock         | max_capacity
+Hospital              | ward_id       | currently_admitted    | max_bed_capacity
+Shipping Fleet        | vessel_id     | containers_loaded     | teu_limit
+Server Farm           | rack_id       | active_compute_tb     | max_compute_allowance
+Retail Apparel        | sku           | units_on_floor        | stockroom_limit
+Pharmaceutical        | drug_id       | current_stock         | max_capacity
+Electronics           | part_id       | current_stock         | max_capacity
+Food Cold Chain       | item_id       | current_stock         | max_capacity
+Automotive Parts      | part_number   | quantity_on_hand      | (unconstrained)
+
+The inference engine handles:
+  - Different primary key naming conventions (id, key, sku, ref, code, name)
+  - Same-stem constraint pairs (current_stock ↔ max_capacity)
+  - Cross-stem pairs with no shared word (containers_loaded ↔ teu_limit)
+  - Unit suffixes in column names (_tb, _gb, _kb for compute resources)
+  - Data-driven validation: cross-stem pairs require >= 75% of rows to
+    satisfy mutable <= limit
+
+================================================================================
+ 8. DATA ARCHITECTURE
+================================================================================
+
+8.1 Directory Structure
+------------------------
+
+  data/
+  └── workspaces/
+      ├── default/
+      │   ├── inventory.csv
+      │   ├── transaction_log.csv
+      │   ├── agent_trust_scores.json
+      │   └── metadata.json
+      ├── {workspace_2}/
+      │   └── ...
+      └── {workspace_n}/
+          └── ...
+
+Legacy files (backward compatibility):
+  data/
+  ├── inventory.csv
+  ├── transaction_log.csv
+  └── agent_trust_scores.json
+
+8.2 Inventory CSV (Default Mock Data)
+--------------------------------------
+Columns: item_id, item_type, location_id, current_stock, max_capacity, unit_cost_usd
+
+Sample rows:
+  ITEM-PLASTIC-01     | RAW_MATERIAL      | WH-A-RAW       | 8500  | 15000 | 0.45
+  ITEM-MICROCHIP-01   | RAW_MATERIAL      | WH-A-RAW       | 3200  | 6000  | 2.80
+  ITEM-FG-TOY-DELUXE  | FINISHED_GOOD     | WH-C-FG        | 2300  | 5000  | 18.99
+
+The inventory CSV is dynamic — users can upload any CSV via the UI, and the
+schema engine will infer the correct structure automatically.
+
+8.3 Transaction Log CSV
+-------------------------
+Columns: transaction_id, timestamp, event_id, agent_id, action_schema,
+         financial_impact, sandbox_approved
+
+Append-only audit ledger. Every committed action and every sandbox rejection
+is recorded here for Analyst review.
+
+8.4 Trust Scores JSON
+-----------------------
+Structure:
+  {
+    "global_metrics": {
+      "routing_threshold": 0.50,
+      "last_analysis_run": "2026-03-05T17:03:24+00:00"
+    },
+    "agents": {
+      "maker": {
+        "trust_score": 0.95,
+        "total_decisions": 0,
+        "recent_penalties": 0,
+        "preferred_fallback": "mover"
+      },
+      "mover": { ... },
+      "keeper": { ... }
+    }
+  }
+
+================================================================================
+ 9. TEST SUITE
+================================================================================
+
+9.1 Unit Tests (tests/test_edge_cases.py)
+------------------------------------------
+5 test classes, 25+ test methods, all deterministic (no API calls).
+
+CLASS 1: TestSandboxHallucinationGuard (7 tests)
+  - Overflow above max_capacity → REJECTED
+  - Marginally over limit (+1) → REJECTED
+  - Exactly at limit → SAFE
+  - Valid decrease within bounds → SAFE
+  - Massive overflow on finished goods → REJECTED
+  - Unknown row key → REJECTED
+  - Nonexistent column → REJECTED
+
+CLASS 2: TestSandboxPhysicsGuard (5 tests)
+  - Below zero stock → REJECTED
+  - Exact zero depletion → SAFE
+  - Minus one below zero → REJECTED
+  - Physics applies to unconstrained columns → REJECTED
+  - Massive depletion beyond stock → REJECTED
+
+CLASS 3: TestDynamicSchemaInferencer (12 tests)
+  - Toy factory: current_stock → max_capacity, PK = item_id
+  - Hospital: currently_admitted → max_bed_capacity, PK = ward_id
+  - Shipping: containers_loaded → teu_limit, PK = vessel_id
+  - Server farm: active_compute_tb → max_compute_allowance, PK = rack_id
+  - Retail: units_on_floor → stockroom_limit, PK = sku
+  - as_agent_summary() produces meaningful multi-line output
+  - Empty DataFrame raises ValueError
+
+CLASS 4: TestTrustOverride (3 tests, all mocked)
+  - Trust override triggers when score < threshold
+  - No override when trust is healthy
+  - Override records correct original_llm_choice
+
+CLASS 5: TestHospitalSandbox (3 tests)
+  - Hospital overflow above max_bed_capacity → REJECTED
+  - Admitting within capacity → SAFE
+  - Discharging below zero → REJECTED
+
+9.2 End-to-End Tests (tests/test_crisis_e2e.py)
+-------------------------------------------------
+Full pipeline test harness running real LLM calls through
+Dispatcher → Specialist for 4 industry datasets × 2 crises each = 8 total:
+
+  1. Pharmaceutical Warehouse
+     - PHARMA-01: Vaccine shipping delay (CRITICAL)
+     - PHARMA-02: Warehouse overflow (HIGH)
+
+  2. Electronics Manufacturing
+     - ELEC-01: Taiwan earthquake chip shortage (CRITICAL)
+     - ELEC-02: Typhoon battery shipping delay (HIGH)
+
+  3. Food Cold Chain
+     - FOOD-01: Refrigeration failure (CRITICAL)
+     - FOOD-02: Avocado blight supply shortage (HIGH)
+
+  4. Automotive Parts
+     - AUTO-01: Brembo factory fire (CRITICAL)
+     - AUTO-02: Seasonal tire inventory imbalance (HIGH)
+
+Evaluation criteria (100-point scoring):
+  - Final answer exists (-40 if missing)
+  - Mitigation proposal format present (-15 if missing)
+  - Actions actually taken (-30 if "none" or "unable")
+  - propose_state_change called (-25 if missing)
+  - get_dataset_schema called first (-10 if not)
+  - query_data called (-15 if missing)
+  - No "lack of data" confusion (-20 if present)
+  - Financial impact calculated (-5 if unknown)
+  - No pipeline errors (-30 if error)
+  - No bogus trust overrides (-10 if triggered incorrectly)
+
+Results written to tests/crisis_results/ (JSON + summary text).
+
+9.3 Test Data Files (tests/data/)
+----------------------------------
+  - hospital_data.csv: 80 wards, 11 columns
+  - shipping_fleet.csv: 60 vessels, 15 columns
+  - server_farm.csv: 75 racks, 15 columns
+  - retail_apparel.csv: 100 SKUs, 17 columns
+
+================================================================================
+ 10. STREAMLIT UI FEATURES
+================================================================================
+
+10.1 Dashboard Layout
+----------------------
+  - Header: gradient bar with "Sentinel — Supply Chain Digital Twin" title
+  - Sidebar: workspace selector, CSV upload, inventory stats, trust score bars,
+    API key status
+  - Main area: 4 tabs (Crisis Console, Inventory, Transaction Log, Schema)
+
+10.2 Crisis Console
+---------------------
+  - Preset crisis selector (dropdown with 4 mock crises)
+  - Custom crisis input (free-text description, event type, severity)
+  - Scanner button: auto-detect crises from current dataset
+  - Chat-style rendering of agent reasoning steps:
+    - Human messages (blue bubbles)
+    - Agent messages (green bubbles)
+    - System messages (purple bubbles with left border)
+    - Tool calls (orange bubbles)
+    - Rejection messages (red left border)
+    - Safe messages (green left border)
+    - Trust override messages (yellow left border)
+  - HITL approval: "Approve & Execute" / "Reject Changes" buttons
+  - Analyst review button: run trust score evaluation
+
+10.3 Workspace Management
+---------------------------
+  - Create new workspace
+  - Switch between workspaces
+  - Delete workspace (with confirmation)
+  - Upload CSV to any workspace
+  - Workspace metadata tracking (created_at, last_updated, row_count, etc.)
+
+10.4 Informational Query Mode
+-------------------------------
+  - Ask natural language questions about the current dataset
+  - Uses INFO_TOOLS (read-only: schema + query, no state mutation)
+  - Agent cannot fabricate crises or propose changes in this mode
+
+================================================================================
+ 11. SECURITY & SAFETY CONSIDERATIONS
+================================================================================
+
+  - Path traversal protection: workspace names validated against "../" and "/"
+  - Resolved path check: workspace directory must be under WORKSPACES_DIR
+  - No SQL injection: all data operations via Pandas DataFrames
+  - No command injection: no shell commands executed from user input
+  - HTML escaping in Streamlit output (html.escape for agent messages)
+  - Thread-safe writes: threading.Lock guards all file mutations
+  - Atomic file writes: temp file + rename pattern prevents corruption
+  - Sandbox isolation: deep copies prevent live data corruption
+  - API key validation: GROQ_API_KEY required before any LLM call
+  - Trust score bounds: clamped to [0.0, 1.0] to prevent runaway values
+  - Financial guardrails: MAX_SINGLE_TRANSACTION_USD = $100,000
+
+================================================================================
+ 12. RUNNING THE PROJECT
+================================================================================
+
+Prerequisites:
+  - Python >= 3.11
+  - uv package manager (or pip)
+  - Groq API key (free tier at console.groq.com)
+
+Setup:
+  1. Clone the repository
+  2. Create .env file with: GROQ_API_KEY=gsk_your_key_here
+  3. Install dependencies:
+       uv sync              # production dependencies
+       uv sync --group dev  # include pytest
+  4. Run the app:
+       streamlit run app.py
+  5. Run tests:
+       pytest tests/test_edge_cases.py -v
+
+Environment Variables:
+  - GROQ_API_KEY (required) — Groq cloud API key for all LLM calls
+  - LOG_LEVEL (optional) — Python logging level (default: INFO)
+
+================================================================================
+ 13. DESIGN PATTERNS & ENGINEERING DECISIONS
+================================================================================
+
+  1. Singleton-per-Session: FactoryDataManager and AgentOrchestrator live in
+     st.session_state to survive Streamlit's re-run model.
+
+  2. Settable Singleton for Tools: tool_registry uses a module-level
+     _data_manager reference synced via set_data_manager() on every rerun,
+     ensuring tools always operate on the correct session's data.
+
+  3. Manual ReAct Loop: LangChain's create_react_agent breaks on Groq's
+     tool calling, so a custom loop handles the think→act→observe cycle.
+
+  4. XML Error Recovery: Groq/Llama models sometimes emit <function=name>
+     XML instead of JSON tool calls. The error string is parsed to extract
+     the intended tool call and execute it anyway.
+
+  5. Schema Inference over Configuration: Instead of requiring users to map
+     columns manually, regex heuristics + data validation automatically
+     discover the structure. This is the core multi-tenancy enabler.
+
+  6. Two-Phase Commit: Agent proposals are never auto-committed. They are
+     staged and require human approval, with re-validation at commit time
+     to catch stale deltas.
+
+  7. Deep Copy Everywhere: get_inventory() always returns a deep copy.
+     ShadowSandbox deep-copies on init. Evaluation uses fresh clones.
+     This prevents any accidental mutation of live state.
+
+  8. Append-Only Audit Ledger: transaction_log.csv is never truncated during
+     normal operation (only on dataset reset). Every action, approval, and
+     rejection is recorded for the Analyst and compliance.
+
+  9. Fallback Chain: Each agent has a preferred_fallback. If trust drops
+     below threshold, routing falls through deterministically. The chain
+     is: maker→mover→keeper→maker (circular).
+
+  10. Lazy Orchestrator Init: The AgentOrchestrator is not created until the
+      first crisis is triggered. This allows the app to boot and display
+      the UI even if the API key is missing — the error is shown in the
+      sidebar instead of crashing the app.
+
+================================================================================
+ 14. PROJECT STATISTICS
+================================================================================
+
+Source Files:
+  - app.py: ~900+ lines
+  - src/agents/orchestrator.py: ~835 lines
+  - src/agents/prompts.py: ~294 lines
+  - src/core/schema_engine.py: ~537 lines
+  - src/core/sandbox.py: ~362 lines
+  - src/core/state_manager.py: ~810 lines
+  - src/tools/tool_registry.py: ~785 lines
+  - src/core/config.py: ~102 lines
+  - tests/test_edge_cases.py: ~704 lines
+  - tests/test_crisis_e2e.py: ~420 lines
+  Total: ~5,750+ lines of application code
+
+Test Coverage:
+  - 5 test classes, 25+ test methods (unit tests)
+  - 8 end-to-end crisis scenarios across 4 industry datasets
+  - All unit tests are deterministic (mocked LLM calls)
+
+Industry Datasets Tested:
+  - Toy Factory, Hospital, Shipping Fleet, Server Farm, Retail Apparel
+  - Pharmaceutical Warehouse, Electronics Manufacturing, Food Cold Chain,
+    Automotive Parts (E2E tests)
+
+Dependencies:
+  - 10 direct production dependencies
+  - 2 dev dependencies (pytest, pytest-cov)
+
+================================================================================
+ 15. GLOSSARY
+================================================================================
+
+  Term                    | Meaning
+  ----------------------- | ------------------------------------------------
+  Digital Twin            | Virtual representation of a physical supply chain
+  Shadow Sandbox          | Isolated DataFrame clone for proposal validation
+  HITL                    | Human-in-the-Loop approval for state changes
+  ReAct                   | Reasoning + Acting loop for tool-calling agents
+  DispatchRoute           | Structured routing decision from the Dispatcher
+  SchemaProfile           | Inferred structural description of a DataFrame
+  ConstraintRule          | Mutable-column → limit-column pair
+  Trust Score             | Float [0,1] measuring agent reliability
+  ROUTING_THRESHOLD       | Minimum trust score for direct routing (0.50)
+  Pending Changes         | Staged proposals awaiting human approval
+  Two-Phase Commit        | Stage-then-commit pattern with HITL gate
+  Master Clipboard        | The live inventory DataFrame
+  Mitigation Proposal     | Structured final output from specialist agents
+  Retrospective Weighting | Adaptive trust scoring based on past outcomes
+
+================================================================================
+                           END OF DOCUMENT
+================================================================================
