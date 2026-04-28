@@ -25,13 +25,14 @@ Usage
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import threading
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 import pandas as pd
 
@@ -240,8 +241,10 @@ class FactoryDataManager:
         self._transaction_log: pd.DataFrame = self._load_or_create_transaction_log()
         self._trust_scores: dict[str, Any] = self._load_or_create_trust_scores()
 
-        # Cached schema profile — invalidated when the inventory DataFrame changes.
+        # Cached schema profile — invalidated only when columns/dtypes change
+        # (signature-based invalidation; pure value mutations preserve the cache).
         self._schema_cache: SchemaProfile | None = None
+        self._schema_cache_signature: Optional[str] = None
 
         # Per-session staging queue for two-phase commit (HITL approval).
         # Changes are STAGED here by propose_state_change and only COMMITTED
@@ -479,7 +482,10 @@ class FactoryDataManager:
         with self._write_lock:
             self._inventory = new_df
             self._flush_inventory()
-            self._schema_cache = None  # Invalidate — columns may have changed
+            # Full DataFrame replacement: columns can change drastically, so
+            # unconditionally drop the cache (keep paired signature in sync).
+            self._schema_cache = None
+            self._schema_cache_signature = None
             self.pending_changes.clear()
         logger.info(
             "Inventory updated in-place for workspace '%s'. Rows: %d. "
@@ -508,20 +514,57 @@ class FactoryDataManager:
         """
         return self._inventory.copy(deep=True)
 
+    def _columns_signature(self, df: pd.DataFrame) -> str:
+        """Stable hash of column names + dtypes. Schema depends on this only.
+
+        Schema inference (primary key detection, constraint pair extraction)
+        is determined entirely by column names and dtypes — never by row
+        values. We therefore key the schema cache off this signature so that
+        pure value mutations (e.g., decrementing a stock count) do not force
+        an O(n*m) re-inference on the next read.
+
+        Args:
+            df: The DataFrame whose column-shape signature should be computed.
+
+        Returns:
+            A hex SHA-256 digest of the sorted ``"col:dtype"`` pairs, or the
+            empty string for ``None``/empty frames.
+        """
+        if df is None or df.empty:
+            return ""
+        parts = [f"{col}:{df[col].dtype}" for col in sorted(df.columns)]
+        return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()
+
     def get_schema_profile(self) -> SchemaProfile:
         """Return the cached schema profile, inferring it on first access.
 
-        The profile is cached for the lifetime of this manager instance and
-        invalidated whenever the inventory DataFrame is mutated (via
-        ``update_inventory``) or replaced (via CSV upload, which creates a
-        new ``FactoryDataManager``).
+        The profile is cached using a column-signature key (see
+        ``_columns_signature``). The cache is reused across pure value
+        mutations and only re-inferred when columns are added, removed,
+        renamed, or change dtype — i.e., when something the inferencer
+        actually examines has changed.
 
         Returns:
             The inferred ``SchemaProfile`` for the current inventory.
+
+        Note:
+            This method intentionally does NOT acquire ``_write_lock`` because
+            it is called from inside write paths that already hold the lock
+            (e.g., ``update_inventory`` -> ``_detect_primary_key`` ->
+            ``get_schema_profile``). Re-entering a non-reentrant ``Lock``
+            would deadlock. Cache reads are atomic enough under the GIL; the
+            worst case under contention is one redundant inference.
         """
-        if self._schema_cache is None:
-            from src.core.schema_engine import DynamicSchemaInferencer
-            self._schema_cache = DynamicSchemaInferencer(self._inventory).infer()
+        current_sig = self._columns_signature(self._inventory)
+        if (
+            self._schema_cache is not None
+            and self._schema_cache_signature == current_sig
+        ):
+            return self._schema_cache
+
+        from src.core.schema_engine import DynamicSchemaInferencer
+        self._schema_cache = DynamicSchemaInferencer(self._inventory).infer()
+        self._schema_cache_signature = current_sig
         return self._schema_cache
 
     def _detect_primary_key(self) -> str:
@@ -586,7 +629,9 @@ class FactoryDataManager:
             self._flush_transaction_log()
 
             self.pending_changes.clear()
+            # New dataset path: drop cache and signature together.
             self._schema_cache = None
+            self._schema_cache_signature = None
 
         logger.info("Trust scores, transaction log, and pending changes reset for new dataset.")
 
@@ -660,7 +705,17 @@ class FactoryDataManager:
 
             self._inventory.at[idx, target_column] = new_value
             self._flush_inventory()
-            self._schema_cache = None  # Invalidate — data values changed
+
+            # Signature-based invalidation: schema only depends on column
+            # names + dtypes, never on values. A cell update is unlikely to
+            # change the dtype, but check defensively (e.g., int64 -> float64
+            # if quantity_change is non-integer). Skip the costly re-inference
+            # when the column shape is unchanged.
+            new_sig = self._columns_signature(self._inventory)
+            if new_sig != self._schema_cache_signature:
+                self._schema_cache = None
+                self._schema_cache_signature = None
+            # else: keep cache, columns/dtypes unchanged
 
             logger.info(
                 "Inventory updated | pk=%s | col=%s | old=%.2f | new=%.2f | limit=%.2f",
