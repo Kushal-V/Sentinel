@@ -199,3 +199,20 @@ AUTO_COMMIT_MAX_DELTA_FRACTION: float = 0.05
 AUTO_COMMIT_ENABLED: bool = os.environ.get(
     "SENTINEL_AUTO_COMMIT_ENABLED", "false"
 ).lower() in ("1", "true", "yes", "on")
+
+# ---------------------------------------------------------------------------
+# F5 — Lightweight conversation guardrails layer
+# ---------------------------------------------------------------------------
+# Wraps Dispatcher INPUT (jailbreak / prompt-injection regex) and Specialist
+# / Analyst OUTPUT (PII + secret leak redaction) with a small pluggable
+# layer. See ``src/agents/guardrails.py``. The layer is conservative — input
+# only blocks on explicit jailbreak signatures, and output WARNs with
+# redaction rather than blocking, so a single false positive cannot break a
+# crisis response. Default ON; flip ``SENTINEL_GUARDRAILS_ENABLED=false`` to
+# disable for local development.
+
+#: Master switch for the F5 guardrails. When False, all ``guard_or_raise``
+#: call sites in the orchestrator become no-ops.
+GUARDRAILS_ENABLED: bool = os.environ.get(
+    "SENTINEL_GUARDRAILS_ENABLED", "true"
+).lower() in ("1", "true", "yes", "on")

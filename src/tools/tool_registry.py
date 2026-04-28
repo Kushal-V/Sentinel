@@ -1222,6 +1222,117 @@ def query_past_incidents(crisis_summary: str, top_k: int = 5) -> str:
 
 
 # ---------------------------------------------------------------------------
+# F9 — demand forecasting tool
+# ---------------------------------------------------------------------------
+@tool
+def forecast_demand(target_columns: str = "", horizon: int = 7) -> str:
+    """Forecast demand for inventory rows over the next ``horizon`` steps.
+
+    Reads the workspace's transaction log + current inventory, builds per-row
+    time series, and projects future values using regression or exponential
+    smoothing. Identifies rows at risk of stock-out within the horizon.
+
+    Args:
+        target_columns: Comma-separated column names to forecast (e.g.,
+            ``"current_stock,available_units"``). Empty string = auto-detect
+            from schema constraint pairs.
+        horizon: Number of future steps to project (default 7, max 30).
+
+    Returns:
+        Human-readable summary of fleet forecast and at-risk rows.
+    """
+    try:
+        from src.core.forecaster import DemandForecaster
+
+        capped_horizon = max(1, min(int(horizon), 30))
+
+        dm = get_data_manager()
+        if dm is None:
+            return "ERROR: No data manager configured."
+
+        cols = [c.strip() for c in target_columns.split(",") if c.strip()] or None
+
+        # ``get_transaction_log`` is the public accessor on FactoryDataManager;
+        # guard with ``hasattr`` so legacy/alternative managers without it
+        # still produce a forecast (single-point series fallback).
+        log_df = (
+            dm.get_transaction_log()
+            if hasattr(dm, "get_transaction_log")
+            else None
+        )
+
+        forecaster = DemandForecaster(
+            inventory=dm.get_inventory(),
+            transaction_log=log_df,
+            schema=dm.get_schema_profile(),
+        )
+        result = forecaster.forecast_fleet(
+            horizon=capped_horizon, target_columns=cols
+        )
+        return result.summary()
+    except Exception as exc:  # noqa: BLE001
+        error_msg = f"TOOL ERROR — forecast_demand failed: {exc}"
+        logger.error(error_msg, exc_info=True)
+        return error_msg
+
+
+# ---------------------------------------------------------------------------
+# F2 — causal inference tool
+# ---------------------------------------------------------------------------
+@tool
+def query_causal_impact(
+    treatment_column: str,
+    outcome_column: str,
+    intervention_delta: float,
+    candidate_features: str = "",
+) -> str:
+    """Estimate the causal effect of perturbing one column on another.
+
+    Answers questions like: "If supplier_lead_time increased by 3 days, what
+    happens to current_stock?" Uses linear regression at sample means as a
+    counterfactual estimator. Lightweight — not a full causal-inference
+    framework. Effect interpretation is correlational unless the dataset
+    has true experimental structure.
+
+    Args:
+        treatment_column: Column to perturb (the "cause" candidate).
+        outcome_column: Column to predict (the "effect" candidate).
+        intervention_delta: Magnitude of the hypothetical change to
+            ``treatment_column``. Positive or negative.
+        candidate_features: Optional comma-separated list of additional
+            features. Empty = use all numeric columns.
+
+    Returns:
+        Human-readable summary of the estimated effect, sample size,
+        R², and confidence.
+    """
+    try:
+        from src.core.causal import CausalAnalyzer
+
+        dm = get_data_manager()
+        if dm is None:
+            return "ERROR: No data manager configured."
+
+        feats = [c.strip() for c in candidate_features.split(",") if c.strip()] or None
+
+        analyzer = CausalAnalyzer(
+            inventory=dm.get_inventory(),
+            schema=dm.get_schema_profile(),
+        )
+        effect = analyzer.estimate_effect(
+            treatment_column=treatment_column,
+            outcome_column=outcome_column,
+            intervention_delta=float(intervention_delta),
+            candidate_features=feats,
+        )
+        return effect.summary()
+    except Exception as exc:  # noqa: BLE001
+        error_msg = f"TOOL ERROR — query_causal_impact failed: {exc}"
+        logger.error(error_msg, exc_info=True)
+        return error_msg
+
+
+# ---------------------------------------------------------------------------
 # Tool registry export
 # ---------------------------------------------------------------------------
 
@@ -1233,6 +1344,8 @@ SENTINEL_TOOLS: list = [
     propose_state_change,
     ask_other_agent,
     query_past_incidents,
+    forecast_demand,
+    query_causal_impact,
 ]
 
 #: Read-only tools for informational queries — no state mutation allowed.
@@ -1240,4 +1353,6 @@ INFO_TOOLS: list = [
     get_dataset_schema,
     query_data,
     query_past_incidents,
+    forecast_demand,
+    query_causal_impact,
 ]

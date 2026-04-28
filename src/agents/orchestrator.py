@@ -45,6 +45,8 @@ from src.agents.prompts import (
 from src.core import config
 from src.core.state_manager import FactoryDataManager
 from src.agents.groq_recovery import parse_groq_xml_tool_call
+# F5 — guardrails
+from src.agents.guardrails import GuardrailViolation, guard_or_raise
 from src.observability.cost_tracker import CostTracker
 from src.observability.tracing import get_callbacks
 from src.tools.tool_registry import INFO_TOOLS, SENTINEL_TOOLS
@@ -368,7 +370,28 @@ class AgentOrchestrator:
         Raises:
             RuntimeError: If the Dispatcher LLM fails to produce a valid
                 ``DispatchRoute`` after retries.
+            GuardrailViolation: If the F5 input guard blocks the crisis
+                description (e.g. jailbreak / prompt-injection pattern,
+                empty input, or above the length cap). Only raised when
+                ``config.GUARDRAILS_ENABLED`` is True.
         """
+        # F5 — guardrails: inspect the dispatcher input before any LLM call.
+        # We guard the natural-language ``crisis.description`` (the only
+        # field that can carry user-supplied free text). On BLOCK we
+        # re-raise so the caller surfaces a clean rejection instead of
+        # paying for an LLM round-trip that might leak the attack into
+        # the trace.
+        if config.GUARDRAILS_ENABLED:
+            try:
+                guard_or_raise(crisis.description, direction="input")
+            except GuardrailViolation as exc:
+                logger.warning(
+                    "Input guardrail blocked crisis '%s': %s",
+                    crisis.event_id,
+                    exc.reason,
+                )
+                raise
+
         trust_data: dict[str, Any] = self._data_manager.get_trust_scores()
         agents_trust: dict[str, Any] = trust_data.get("agents", {})
         threshold: float = config.ROUTING_THRESHOLD
@@ -671,6 +694,25 @@ class AgentOrchestrator:
         except Exception as exc:
             yield {"type": "error", "content": f"Agent execution failed: {exc}"}
             return
+
+        # F5 — guardrails: inspect the specialist final answer for PII /
+        # secret leakage. WARN-level matches are redacted in place; BLOCK
+        # surfaces as an error step rather than the final answer so the
+        # UI can render a graceful rejection.
+        if config.GUARDRAILS_ENABLED and final_text:
+            try:
+                final_text = guard_or_raise(final_text, direction="output")
+            except GuardrailViolation as exc:
+                logger.warning(
+                    "Output guardrail blocked specialist '%s' answer: %s",
+                    agent_id,
+                    exc.reason,
+                )
+                yield {
+                    "type": "error",
+                    "content": f"Output blocked by guardrail: {exc.reason}",
+                }
+                return
 
         yield {
             "type": "final_answer",
@@ -1099,7 +1141,27 @@ class AgentOrchestrator:
                         exc,
                     )
 
-            return review.summary
+            # F5 — guardrails: redact any PII / secret leakage from the
+            # analyst summary before it reaches the UI. We swallow a
+            # BLOCK verdict here (returning a generic placeholder) since
+            # the analyst result is non-critical metadata — losing the
+            # summary should never crash the trust-update pipeline.
+            summary_text = review.summary or ""
+            if config.GUARDRAILS_ENABLED and summary_text:
+                try:
+                    summary_text = guard_or_raise(
+                        summary_text, direction="output"
+                    )
+                except GuardrailViolation as exc:
+                    logger.warning(
+                        "Output guardrail blocked analyst summary: %s",
+                        exc.reason,
+                    )
+                    summary_text = (
+                        "[Analyst summary withheld by output guardrail.]"
+                    )
+
+            return summary_text
 
         except Exception as exc:
             error_msg = f"Analyst execution failed: {exc}"
