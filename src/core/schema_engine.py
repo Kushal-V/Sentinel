@@ -47,9 +47,9 @@ _LIMIT_SUFFIX_PATTERNS: Final[list[str]] = [
     r"^max[_\s]?{stem}$",            # max_beds, max_stock
     r"^{stem}[_\s]?max$",            # beds_max, stock_max
     r"^max[_\s]?{stem}[_\s]?.*$",   # max_bed_capacity, max_compute_allowance
-    r"^{stem}[_\s]?(limit|cap|capacity|ceiling|total|size|maximum|upper|allowance)$",
-    r"^(limit|cap|capacity|ceiling|total|size|maximum|upper|allowance)[_\s]?{stem}$",
-    r"^max[_\s]?(limit|cap|capacity|ceiling|total|size|maximum|upper|allowance)[_\s]?{stem}$",
+    r"^{stem}[_\s]?(limit|cap|capacity|ceiling|total|size|maximum|upper|allowance|budget|quota)$",
+    r"^(limit|cap|capacity|ceiling|total|size|maximum|upper|allowance|budget|quota)[_\s]?{stem}$",
+    r"^max[_\s]?(limit|cap|capacity|ceiling|total|size|maximum|upper|allowance|budget|quota)[_\s]?{stem}$",
 ]
 
 # Regex that identifies a column as likely being a *limit-side* column.
@@ -57,7 +57,7 @@ _LIMIT_SUFFIX_PATTERNS: Final[list[str]] = [
 _LIMIT_COLUMN_PATTERN: Final[re.Pattern] = re.compile(
     r"(^max[_\s]|[_\s]max$|[_\s]?limit$|[_\s]?capacity$|[_\s]?cap$"
     r"|[_\s]?ceiling$|[_\s]?allowance$|[_\s]?maximum$|[_\s]?upper$"
-    r"|[_\s]?room$|^teu[_\s])",
+    r"|[_\s]?room$|^teu[_\s]|[_\s]?budget$|[_\s]?total$|[_\s]?quota$)",
     re.IGNORECASE,
 )
 
@@ -492,11 +492,14 @@ class DynamicSchemaInferencer:
         for prefix in strip_prefixes:
             stem = re.sub(rf"^{prefix}[_\s]?", "", stem)
 
-        # Strip known level/current tokens from end
+        # Strip known level/current tokens from end. Unit suffixes (_gb,
+        # _tb, _kb, _watts, _gbps) are intentionally NOT stripped — they
+        # are part of the stem (memory_gb, power_watts) and the LIMIT
+        # column carries the same unit (memory_gb_total, power_watts_budget).
         strip_suffixes = (
             "level", "used", "occupied", "in_use", "on_hand",
             "qty", "quantity", "count", "loaded", "admitted",
-            "_tb", "_gb", "_kb",  # unit suffixes for compute resources
+            "current", "draw",
         )
         for suffix in strip_suffixes:
             stem = re.sub(rf"[_\s]?{re.escape(suffix)}$", "", stem)
