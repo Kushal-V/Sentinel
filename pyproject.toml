@@ -10,6 +10,7 @@ dependencies = [
     "langchain>=1.0.0,<2.0",
     "langchain-core>=1.2.8,<2.0",
     "langchain-groq>=1.1.2",
+    "langgraph>=0.3.0",
     "langfuse>=3.0.0",
     "plotly>=5.20.0",
     "python-dotenv>=1.0.0",

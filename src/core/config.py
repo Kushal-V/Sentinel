@@ -8,6 +8,7 @@ so that any component in the system can import a single source of truth instead
 of hard-coding magic strings or numbers.
 """
 
+import os
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
@@ -132,3 +133,16 @@ LANGFUSE_SECRET_KEY_ENV: str = "LANGFUSE_SECRET_KEY"
 #: Optional self-hosted Langfuse URL. Defaults to https://cloud.langfuse.com
 #: when unset (handled by the Langfuse SDK).
 LANGFUSE_HOST_ENV: str = "LANGFUSE_HOST"
+
+# ---------------------------------------------------------------------------
+# Feature Flags — Phase 4 (LangGraph migration)
+# ---------------------------------------------------------------------------
+
+#: When True, ``AgentOrchestrator.run_specialist`` routes through the new
+#: LangGraph ``StateGraph`` in ``src/agents/graph.py`` instead of the
+#: legacy manual ReAct loop. Defaults to False so production stays on the
+#: proven path; flip to True (via ``SENTINEL_USE_LANGGRAPH=1``) once
+#: parity is verified in staging.
+USE_LANGGRAPH: bool = os.environ.get(
+    "SENTINEL_USE_LANGGRAPH", "false"
+).lower() in ("1", "true", "yes", "on")

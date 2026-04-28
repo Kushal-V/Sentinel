@@ -466,6 +466,19 @@ class AgentOrchestrator:
             "Follow your mandatory tool call order. Produce a full Mitigation Proposal."
         )
 
+        # Phase 4 — LangGraph migration. When the feature flag is on,
+        # delegate to the StateGraph path. The flag-off path below
+        # (manual ReAct loop) is the proven production behaviour and is
+        # NOT modified by this commit.
+        if config.USE_LANGGRAPH:
+            yield from self._run_specialist_graph(
+                agent_id=agent_id,
+                system_prompt=system_prompt,
+                input_text=input_text,
+                chat_history=chat_history,
+            )
+            return
+
         # Build message list: System + history + human turn
         messages: list[Any] = [
             SystemMessage(content=system_prompt),
@@ -630,6 +643,97 @@ class AgentOrchestrator:
             "content": final_text or "Agent produced no output.",
             "agent_id": agent_id,
         }
+
+    # ------------------------------------------------------------------
+    # Internal: LangGraph specialist execution (Phase 4, behind flag)
+    # ------------------------------------------------------------------
+
+    def _run_specialist_graph(
+        self,
+        agent_id: str,
+        system_prompt: str,
+        input_text: str,
+        chat_history: list[HumanMessage | AIMessage],
+    ) -> Generator[dict[str, Any], None, None]:
+        """Execute the specialist via the LangGraph ``StateGraph``.
+
+        Mirrors ``run_specialist``'s yielded step-dict contract so the
+        Streamlit UI in ``app.py`` continues to render unchanged. Only
+        called when ``config.USE_LANGGRAPH`` is True.
+
+        Args:
+            agent_id: Specialist persona ID (e.g. ``"maker"``).
+            system_prompt: The persona's system prompt text.
+            input_text: The dispatcher-formatted human turn text.
+            chat_history: Multi-turn LangChain message history.
+
+        Yields:
+            Step dicts in the exact shape ``app.py::_render_chat_bubble``
+            consumes from the legacy manual ReAct loop.
+        """
+        # Local imports keep the legacy path free of any LangGraph
+        # imports. If a user flips the flag without ``langgraph``
+        # installed, the failure surfaces here, not at module load.
+        from src.agents.graph import (
+            build_specialist_graph,
+            messages_to_step_dicts,
+        )
+
+        max_iterations = 10
+        graph = build_specialist_graph(
+            llm=self._specialist_llm,
+            tools=SENTINEL_TOOLS,
+            max_iterations=max_iterations,
+        )
+
+        initial_messages: list[Any] = [
+            SystemMessage(content=system_prompt),
+        ] + list(chat_history) + [
+            HumanMessage(content=input_text),
+        ]
+        initial_state: dict[str, Any] = {
+            "messages": initial_messages,
+            "iteration_count": 0,
+            "max_iterations": max_iterations,
+            "agent_id": agent_id,
+        }
+
+        prev_messages: list[Any] = list(initial_messages)
+        final_emitted = False
+        try:
+            for state in graph.stream(
+                initial_state, stream_mode="values"
+            ):
+                current_messages = state.get("messages", [])
+                new_steps = messages_to_step_dicts(
+                    prev_messages,
+                    current_messages,
+                    agent_id=agent_id,
+                    iteration=state.get("iteration_count", 0),
+                )
+                for step in new_steps:
+                    if step.get("type") == "final_answer":
+                        final_emitted = True
+                    yield step
+                prev_messages = list(current_messages)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("LangGraph specialist execution failed")
+            yield {
+                "type": "error",
+                "content": f"Agent execution failed: {exc}",
+            }
+            return
+
+        # Safety net: if the graph terminated without ever emitting a
+        # final answer (e.g. max_iterations capped before the LLM
+        # produced a tool-call-free response), surface a stub so the UI
+        # always closes the conversation cleanly.
+        if not final_emitted:
+            yield {
+                "type": "final_answer",
+                "content": "Agent produced no output.",
+                "agent_id": agent_id,
+            }
 
     # ------------------------------------------------------------------
     # Public: Informational Query (no crisis fabrication)
