@@ -68,6 +68,12 @@ _INVENTORY_DTYPE: dict[str, str] = {
 }
 
 #: Expected columns and their dtypes for the transaction log DataFrame.
+#:
+#: F4 additions:
+#:   - ``auto_committed`` flags whether a row was committed via the
+#:     confidence-routed HITL fast-path (True) versus a human approval (False).
+#:   - ``confidence`` records the agent's self-rated 0.0–1.0 confidence at
+#:     the time of proposal. ``-1.0`` is a sentinel for "not provided".
 _TRANSACTION_LOG_DTYPE: dict[str, str] = {
     "transaction_id": "str",
     "timestamp": "str",
@@ -76,6 +82,8 @@ _TRANSACTION_LOG_DTYPE: dict[str, str] = {
     "action_schema": "str",   # Serialised JSON string
     "financial_impact": "float64",
     "sandbox_approved": "bool",
+    "auto_committed": "bool",
+    "confidence": "float64",
 }
 
 
@@ -326,6 +334,17 @@ class FactoryDataManager:
                 # File exists but is empty (header only) — acceptable.
                 df = _build_empty_transaction_log()
             else:
+                # F4: ``auto_committed`` and ``confidence`` are new columns.
+                # Backfill with safe defaults on legacy logs so older
+                # transaction logs continue to load without ValueError.
+                _LEGACY_BACKFILLS: dict[str, Any] = {
+                    "auto_committed": "False",
+                    "confidence": "-1.0",
+                }
+                for col, default in _LEGACY_BACKFILLS.items():
+                    if col not in df.columns:
+                        df[col] = default
+
                 missing_cols = set(_TRANSACTION_LOG_DTYPE) - set(df.columns)
                 if missing_cols:
                     raise ValueError(
@@ -734,7 +753,14 @@ class FactoryDataManager:
     # Public: Write operations
     # ------------------------------------------------------------------
 
-    def update_inventory(self, item_id: str, target_column: str, quantity_change: float) -> bool:
+    def update_inventory(
+        self,
+        item_id: str,
+        target_column: str,
+        quantity_change: float,
+        auto_committed: bool = False,
+        confidence: Optional[float] = None,
+    ) -> bool:
         """Update a numeric column for a given row and persist to disk.
 
         This method is fully dynamic — it detects the primary key column
@@ -745,6 +771,17 @@ class FactoryDataManager:
             item_id: Value in the primary key column identifying the row.
             target_column: The numeric column to update.
             quantity_change: Signed integer delta to apply.
+            auto_committed: F4 — True iff this update was applied via the
+                confidence-routed HITL fast-path (no human gate). False for
+                changes approved by a human operator. Surfaced here so the
+                callsite can pass the same flag straight through to
+                ``log_transaction`` without duplicating the value at the
+                tool-registry layer. Defaults to False (legacy/HITL).
+            confidence: F4 — agent self-rated confidence (0.0–1.0) at the
+                time of proposal, or None if not provided. Mirror of the
+                ``log_transaction`` parameter (purely informational on this
+                method — the actual ledger write happens in
+                ``log_transaction``). Defaults to None.
 
         Returns:
             ``True`` on successful update and disk flush.
@@ -752,6 +789,11 @@ class FactoryDataManager:
         Raises:
             ValueError: If the row or column doesn't exist, or constraints are violated.
         """
+        # ``auto_committed`` / ``confidence`` are accepted for signature
+        # parity with ``log_transaction`` so the commit path can forward
+        # the same kwargs to both calls. The actual ledger write happens
+        # inside ``log_transaction`` — this method touches inventory only.
+        del auto_committed, confidence  # surfaced for callsite parity only
         with self._write_lock:
             pk_col = self._detect_primary_key()
             mask = self._inventory[pk_col] == item_id
@@ -819,6 +861,8 @@ class FactoryDataManager:
         action_schema: dict[str, Any],
         financial_impact: float,
         sandbox_approved: bool,
+        auto_committed: bool = False,
+        confidence: Optional[float] = None,
     ) -> None:
         """Append a new record to the transaction ledger and flush to disk.
 
@@ -835,6 +879,12 @@ class FactoryDataManager:
             sandbox_approved: ``True`` if the Sandbox validated the action
                 before it was committed; ``False`` if the record is being
                 written to capture a rejection event.
+            auto_committed: F4 — ``True`` iff this row was committed via
+                the confidence-routed HITL fast-path (no human approval).
+                ``False`` (default) for HITL-approved or rejection records.
+            confidence: F4 — agent self-rated confidence (0.0–1.0) at the
+                time of proposal. ``None`` is stored as the sentinel
+                ``-1.0`` in the CSV column.
 
         Returns:
             None
@@ -856,6 +906,10 @@ class FactoryDataManager:
         if not agent_id:
             agent_id = "unknown"
 
+        # F4 — sentinel ``-1.0`` distinguishes "not provided" from a real
+        # zero confidence. The dtype is float64 so we cannot store None.
+        confidence_value: float = -1.0 if confidence is None else float(confidence)
+
         record: dict[str, Any] = {
             "transaction_id": str(uuid.uuid4()),
             "timestamp": datetime.now(tz=timezone.utc).isoformat(),
@@ -864,6 +918,8 @@ class FactoryDataManager:
             "action_schema": json.dumps(action_schema),
             "financial_impact": float(financial_impact),
             "sandbox_approved": sandbox_approved,
+            "auto_committed": bool(auto_committed),
+            "confidence": confidence_value,
         }
 
         with self._write_lock:

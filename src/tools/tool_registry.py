@@ -50,6 +50,7 @@ from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 
 from src.agents.groq_recovery import parse_groq_xml_tool_call
+from src.core import config as sentinel_config
 from src.core.sandbox import SandboxResult, ShadowSandbox
 from src.core.state_manager import FactoryDataManager
 from src.observability.tracing import get_callbacks
@@ -139,78 +140,269 @@ def _get_ask_other_agent_client() -> "ChatGroq":
 # Two-Phase Commit — Staging Queue for HITL Approval
 # ---------------------------------------------------------------------------
 
-def commit_pending_changes() -> list[dict[str, Any]]:
-    """Commit all staged changes to the live FactoryDataManager.
+def auto_commit_eligible(
+    change: dict[str, Any],
+    manager: "FactoryDataManager",
+) -> tuple[bool, str]:
+    """Decide whether a staged change is eligible for autonomous commit.
 
-    Called by the HITL approval flow in ``app.py``.  Each staged change is
-    **re-validated** against the current inventory state via the Shadow Sandbox
-    before being applied.  This guards against stale deltas: if the data changed
-    between staging and approval, the sandbox will reject the now-invalid change.
+    A change is eligible iff ALL of the following hold:
+
+    1. ``config.AUTO_COMMIT_ENABLED`` is True (master switch).
+    2. ``change["confidence"] >= AUTO_COMMIT_CONFIDENCE_THRESHOLD``.
+    3. The proposing agent's trust score is
+       ``>= AUTO_COMMIT_TRUST_THRESHOLD``.
+    4. ``|delta| / |current_value| <= AUTO_COMMIT_MAX_DELTA_FRACTION``.
+       When the current value is 0 (cannot compute a ratio) or the
+       row/column cannot be located, the change is treated as
+       ineligible — the safe default.
+
+    The check is column-name agnostic: it reads the primary-key column
+    and current row value via the cached ``SchemaProfile`` and the live
+    DataFrame, so it works on any tenant's schema without modification.
+
+    Args:
+        change: A staged change dict (as appended by ``propose_state_change``).
+        manager: The active ``FactoryDataManager`` whose inventory and
+            trust scores should be consulted.
 
     Returns:
-        List of successfully committed change dicts for display.
+        ``(eligible, reason)`` — ``reason`` is a short human-readable
+        explanation that surfaces the failing predicate for audit/UI.
     """
-    dm = get_data_manager()
-    committed: list[dict[str, Any]] = []
+    if not sentinel_config.AUTO_COMMIT_ENABLED:
+        return False, "AUTO_COMMIT disabled (master switch off)"
 
-    # Atomically drain the queue so concurrent appends from another
-    # tool invocation cannot have a change silently lost between the
-    # read and the reset. Failed changes are re-staged below.
-    drained = dm.clear_pending_changes()
-
-    for change in drained:
-        # Re-validate against the CURRENT state (not the stale staging-time state)
-        live_df = dm.get_inventory()
-        sandbox = ShadowSandbox(live_df)
-        result: SandboxResult = sandbox.evaluate_proposal(
-            row_primary_key=change["row_key"],
-            target_column=change["target_column"],
-            delta=change["delta"],
+    # 1) Confidence threshold ---------------------------------------------
+    confidence = float(change.get("confidence", 0.0))
+    if confidence < sentinel_config.AUTO_COMMIT_CONFIDENCE_THRESHOLD:
+        return False, (
+            f"confidence {confidence:.2f} < threshold "
+            f"{sentinel_config.AUTO_COMMIT_CONFIDENCE_THRESHOLD:.2f}"
         )
 
-        if result.status == "REJECTED":
-            logger.warning(
-                "HITL COMMIT SKIPPED (stale) | row=%s | col=%s | delta=%+.2f | reason=%s",
-                change["row_key"],
-                change["target_column"],
-                change["delta"],
-                result.rejection_reason,
+    # 2) Trust score threshold --------------------------------------------
+    # ``get_trust_scores`` returns a dict shaped ``{"agents": {agent_id:
+    # {"trust_score": float, ...}}, "global_metrics": {...}}``. Older
+    # callers/tests sometimes pass a flat ``{agent_id: float}`` shape, so
+    # we accept both defensively.
+    agent_id = str(change.get("agent_id", ""))
+    raw_scores: Any = manager.get_trust_scores()
+    agents_block: Any = (
+        raw_scores.get("agents", raw_scores)
+        if isinstance(raw_scores, dict)
+        else {}
+    )
+    entry: Any = agents_block.get(agent_id) if isinstance(agents_block, dict) else None
+    if isinstance(entry, dict):
+        trust = float(entry.get("trust_score", 0.0))
+    elif isinstance(entry, (int, float)):
+        trust = float(entry)
+    else:
+        trust = 0.0
+    if trust < sentinel_config.AUTO_COMMIT_TRUST_THRESHOLD:
+        return False, (
+            f"trust {trust:.2f} < threshold "
+            f"{sentinel_config.AUTO_COMMIT_TRUST_THRESHOLD:.2f}"
+        )
+
+    # 3) Delta-magnitude check (column-name agnostic) ---------------------
+    try:
+        inv = manager.get_inventory()
+        profile = manager.get_schema_profile()
+        pk_col = profile.primary_key_column
+        row_key = change.get("row_key")
+        target_col = change.get("target_column")
+        delta = float(change.get("delta", 0.0))
+
+        if (
+            not pk_col
+            or row_key is None
+            or target_col not in inv.columns
+        ):
+            return False, "row/column not resolvable for delta check"
+
+        match = inv[inv[pk_col].astype(str) == str(row_key)]
+        if match.empty:
+            return False, f"row_key '{row_key}' not found in '{pk_col}'"
+
+        current = float(match.iloc[0][target_col])
+        if current == 0:
+            # 0% baseline — any non-zero delta is "infinite" by ratio.
+            # Defensive default: require human review.
+            return False, "current value is 0 — relative delta undefined"
+
+        rel = abs(delta) / abs(current)
+        if rel > sentinel_config.AUTO_COMMIT_MAX_DELTA_FRACTION:
+            return False, (
+                f"delta {rel:.1%} > max "
+                f"{sentinel_config.AUTO_COMMIT_MAX_DELTA_FRACTION:.0%}"
             )
-            # Re-stage the rejected change so the user can retry.
-            dm.add_pending_change(change)
+    except Exception as exc:  # noqa: BLE001
+        # Never let a probe error trigger a silent auto-commit.
+        logger.warning(
+            "auto_commit_eligible delta-check raised: %s — defaulting to ineligible",
+            exc,
+        )
+        return False, f"eligibility check failed defensively: {exc}"
+
+    return True, "all thresholds met"
+
+
+def _commit_one(
+    dm: FactoryDataManager,
+    change: dict[str, Any],
+    *,
+    auto: bool,
+) -> bool:
+    """Commit a single staged change with sandbox re-validation.
+
+    Shared core for both the HITL ("Approve & Execute") path and the F4
+    auto-commit fast-path. Returns True on commit, False on stale-state
+    rejection or update failure (in which case the change is re-staged).
+
+    Args:
+        dm: The active ``FactoryDataManager``.
+        change: The staged change dict.
+        auto: True iff this is the auto-commit fast-path (records
+            ``auto_committed=True`` on the transaction log row).
+    """
+    # Re-validate against the CURRENT state (not the stale staging-time state).
+    # Sandbox re-validation is INVARIANT — we run it for both HITL and
+    # auto-commit so the safety guarantee never depends on which gate
+    # the change passed through.
+    live_df = dm.get_inventory()
+    sandbox = ShadowSandbox(live_df)
+    result: SandboxResult = sandbox.evaluate_proposal(
+        row_primary_key=change["row_key"],
+        target_column=change["target_column"],
+        delta=change["delta"],
+    )
+
+    if result.status == "REJECTED":
+        logger.warning(
+            "%s COMMIT SKIPPED (stale) | row=%s | col=%s | delta=%+.2f | reason=%s",
+            "AUTO" if auto else "HITL",
+            change["row_key"],
+            change["target_column"],
+            change["delta"],
+            result.rejection_reason,
+        )
+        # Re-stage the rejected change so the user/system can retry.
+        dm.add_pending_change(change)
+        return False
+
+    try:
+        confidence_val = change.get("confidence")
+        dm.update_inventory(
+            item_id=change["row_key"],
+            target_column=change["target_column"],
+            quantity_change=change["delta"],
+            auto_committed=auto,
+            confidence=confidence_val,
+        )
+        dm.log_transaction(
+            event_id="AGENT_ACTION",
+            agent_id=change.get("agent_id", "unknown"),
+            action_schema={
+                "row_key": change["row_key"],
+                "target_column": change["target_column"],
+                "delta": change["delta"],
+                "justification": change["justification"],
+                "old_value": change["old_value"],
+                "new_value": change["new_value"],
+            },
+            financial_impact=change.get("financial_impact", 0.0),
+            sandbox_approved=True,
+            auto_committed=auto,
+            confidence=confidence_val,
+        )
+        logger.info(
+            "%s COMMIT | row=%s | col=%s | delta=%+.2f",
+            "AUTO" if auto else "HITL",
+            change["row_key"], change["target_column"], change["delta"],
+        )
+        return True
+    except Exception as exc:
+        logger.error("Failed to commit staged change: %s", exc, exc_info=True)
+        # Re-stage on update failure so the change isn't silently lost.
+        dm.add_pending_change(change)
+        return False
+
+
+def commit_pending_changes(
+    manager: Optional["FactoryDataManager"] = None,
+    auto_only: bool = False,
+) -> Any:
+    """Commit staged changes to the live FactoryDataManager.
+
+    Two modes:
+
+    * ``auto_only=False`` (default — HITL path) — commit ALL staged
+      changes. Returns ``list[dict]`` of the committed changes for
+      backwards compatibility with the HITL approval UI.
+    * ``auto_only=True`` (F4 fast-path) — commit ONLY changes that pass
+      ``auto_commit_eligible``; leave ineligible changes staged for
+      human review. Returns a summary dict ``{"auto_committed_count":
+      int, "deferred_count": int, "auto_committed": [...],
+      "deferred": [...]}``.
+
+    Each change — auto or HITL — is **re-validated** against the current
+    inventory state via the Shadow Sandbox before being applied. The
+    sandbox guarantee is invariant; F4 only bypasses the human gate, not
+    the safety check.
+
+    Args:
+        manager: Optional explicit ``FactoryDataManager``. Defaults to the
+            module-level singleton resolved by ``get_data_manager``. The
+            explicit parameter is provided so tests and ``app.py`` (which
+            already holds ``ss.manager``) can inject without depending on
+            the singleton.
+        auto_only: When True, only auto-eligible changes are committed.
+
+    Returns:
+        ``list[dict]`` in HITL mode, ``dict`` summary in auto mode.
+    """
+    dm: FactoryDataManager = manager if manager is not None else get_data_manager()
+
+    if not auto_only:
+        # ── HITL path: drain everything and commit all ────────────────
+        drained = dm.clear_pending_changes()
+        committed: list[dict[str, Any]] = []
+        for change in drained:
+            if _commit_one(dm, change, auto=False):
+                committed.append(change)
+        return committed
+
+    # ── Auto path: partition before committing ────────────────────────
+    drained = dm.clear_pending_changes()
+    auto_committed: list[dict[str, Any]] = []
+    deferred: list[dict[str, Any]] = []
+
+    for change in drained:
+        eligible, reason = auto_commit_eligible(change, dm)
+        if not eligible:
+            # Re-stage with the eligibility reason attached so the UI
+            # can surface it ("not auto-committed because: <reason>").
+            change_with_reason = dict(change)
+            change_with_reason["_auto_commit_skip_reason"] = reason
+            dm.add_pending_change(change_with_reason)
+            deferred.append(change_with_reason)
             continue
 
-        try:
-            dm.update_inventory(
-                item_id=change["row_key"],
-                target_column=change["target_column"],
-                quantity_change=change["delta"],
-            )
-            dm.log_transaction(
-                event_id="AGENT_ACTION",
-                agent_id=change.get("agent_id", "unknown"),
-                action_schema={
-                    "row_key": change["row_key"],
-                    "target_column": change["target_column"],
-                    "delta": change["delta"],
-                    "justification": change["justification"],
-                    "old_value": change["old_value"],
-                    "new_value": change["new_value"],
-                },
-                financial_impact=change.get("financial_impact", 0.0),
-                sandbox_approved=True,
-            )
-            committed.append(change)
-            logger.info(
-                "HITL COMMIT | row=%s | col=%s | delta=%+.2f",
-                change["row_key"], change["target_column"], change["delta"],
-            )
-        except Exception as exc:
-            logger.error("Failed to commit staged change: %s", exc, exc_info=True)
-            # Re-stage on update failure so the change isn't silently lost.
-            dm.add_pending_change(change)
+        if _commit_one(dm, change, auto=True):
+            auto_committed.append(change)
+        else:
+            # _commit_one re-staged the change on stale-state rejection.
+            # Track it as deferred so the caller's count is accurate.
+            deferred.append(change)
 
-    return committed
+    return {
+        "auto_committed_count": len(auto_committed),
+        "deferred_count": len(deferred),
+        "auto_committed": auto_committed,
+        "deferred": deferred,
+    }
 
 
 def discard_pending_changes() -> int:
@@ -410,6 +602,7 @@ def propose_state_change(
     delta: float,
     justification: str,
     config: RunnableConfig,
+    confidence: float = 0.5,
 ) -> str:
     """Propose a numeric change to a specific cell; validates it through the Shadow Sandbox first.
 
@@ -453,6 +646,21 @@ def propose_state_change(
             Recorded in the transaction log for audit and Analyst review.
             Example: ``"Consuming plastic resin to maintain production rate
             during port strike delay."``
+        confidence: Float in ``[0.0, 1.0]``. Your self-rated certainty that
+            this proposal is correct given the data you've seen. Use:
+
+            * ``0.9–1.0`` — "I am certain — schema clear, data unambiguous,
+              no conflicts with constraint pairs."
+            * ``0.7–0.9`` — "Likely correct, minor ambiguity."
+            * ``0.4–0.7`` — "Reasonable but uncertain — could be wrong."
+            * ``0.0–0.4`` — "Speculative — recommend human review."
+
+            Set honestly. The system uses ``confidence`` (combined with
+            your trust score and the relative size of ``delta``) to decide
+            whether to auto-commit small low-risk changes without
+            requiring human approval. Defaults to ``0.5`` so existing
+            agents that omit the parameter never trip the auto-commit
+            fast-path.
 
     Returns:
         On **SAFE**: A JSON string summarising the staged change::
@@ -482,6 +690,16 @@ def propose_state_change(
     try:
         dm = get_data_manager()
         live_df = dm.get_inventory()
+
+        # -- F4: clamp self-rated confidence into [0.0, 1.0] -------------
+        # Defensive: agents may emit out-of-range floats or non-numeric
+        # strings via JSON tool calls. Clamp + coerce so downstream
+        # auto-commit logic always receives a well-formed float.
+        try:
+            confidence_value = float(confidence)
+        except (TypeError, ValueError):
+            confidence_value = 0.5
+        confidence_value = max(0.0, min(1.0, confidence_value))
 
         # -- Stage 1: Column validation -----------------------------------
         if target_column not in live_df.columns:
@@ -544,6 +762,8 @@ def propose_state_change(
             "limit_value": result.limit_value,
             "financial_impact": financial_impact,
             "agent_id": _infer_calling_agent(config),
+            # F4 — agent self-rated confidence; consumed by auto_commit_eligible.
+            "confidence": confidence_value,
         }
         dm.add_pending_change(staged_change)
 
@@ -557,6 +777,7 @@ def propose_state_change(
             "limit_value": result.limit_value,
             "justification": justification,
             "financial_impact_usd": financial_impact,
+            "confidence": confidence_value,  # F4 — echoed back for transparency
             "note": "Change validated by Sandbox. Awaiting human approval before commit.",
         }
 

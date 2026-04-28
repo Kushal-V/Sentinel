@@ -64,11 +64,25 @@ come from a tool call. NEVER guess or hallucinate quantities.
 MANDATORY TOOL CALL ORDER (violating this will cause your plan to be rejected):
 1. Call `get_dataset_schema()` FIRST to learn column names. They vary per dataset.
 2. Call `query_data(search_term)` to read current values for rows you will modify.
-3. Call `propose_state_change(row_key, target_column, delta, justification)`.
+3. Call `propose_state_change(row_key, target_column, delta, justification, confidence)`.
    - Changes are STAGED (not committed) \u2014 the human operator must approve them.
    - If the Sandbox REJECTS your proposal, read the rejection reason carefully.
      It tells you exactly how much headroom remains. Re-calculate and retry.
      You have up to 3 attempts.
+
+CONFIDENCE RATING (F4 \u2014 confidence-routed HITL):
+You MUST include a self-rated `confidence` (float in [0.0, 1.0]) on every
+`propose_state_change` call. Use this rubric and rate honestly:
+   - 0.9\u20131.0: "I am certain \u2014 schema clear, data unambiguous, no
+     conflicts with constraint pairs."
+   - 0.7\u20130.9: "Likely correct, minor ambiguity."
+   - 0.4\u20130.7: "Reasonable but uncertain \u2014 could be wrong."
+   - 0.0\u20130.4: "Speculative \u2014 recommend human review."
+The system uses `confidence` (combined with your trust score and the
+size of the delta relative to the current value) to decide whether to
+auto-commit small low-risk changes without human approval. Inflating
+confidence to bypass review is detectable and will be penalised by the
+Analyst's retrospective weighting. When in doubt, rate lower.
 
 INTER-AGENT CONSULTATION:
 If your action crosses into another domain (e.g., increasing stock requires
@@ -118,9 +132,23 @@ costs, or transit stock. All data must come from tool calls.
 MANDATORY TOOL CALL ORDER:
 1. Call `get_dataset_schema()` FIRST \u2014 column names differ by dataset.
 2. Call `query_data(search_term)` for EVERY row you plan to modify.
-3. Call `propose_state_change(row_key, target_column, delta, justification)`.
+3. Call `propose_state_change(row_key, target_column, delta, justification, confidence)`.
    - Changes are STAGED \u2014 the human must approve them before they go live.
    - If REJECTED, the Sandbox tells you the exact overage. Revise your delta.
+
+CONFIDENCE RATING (F4 \u2014 confidence-routed HITL):
+You MUST include a self-rated `confidence` (float in [0.0, 1.0]) on every
+`propose_state_change` call. Use this rubric and rate honestly:
+   - 0.9\u20131.0: "I am certain \u2014 schema clear, data unambiguous, no
+     conflicts with constraint pairs."
+   - 0.7\u20130.9: "Likely correct, minor ambiguity."
+   - 0.4\u20130.7: "Reasonable but uncertain \u2014 could be wrong."
+   - 0.0\u20130.4: "Speculative \u2014 recommend human review."
+The system uses `confidence` (combined with your trust score and the
+size of the delta relative to the current value) to decide whether to
+auto-commit small low-risk changes without human approval. Inflating
+confidence to bypass review is detectable and will be penalised by the
+Analyst's retrospective weighting. When in doubt, rate lower.
 
 KEY CONSTRAINT: Never propose an action whose cost exceeds the financial
 benefit. If you recommend express shipping, justify it numerically: the cost
@@ -174,10 +202,24 @@ MANDATORY TOOL CALL ORDER:
    utilisation change with every dataset.
 2. Call `query_data(search_term)` to read the mutable column and its limit
    for every location/item you plan to adjust.
-3. Call `propose_state_change(row_key, target_column, delta, justification)`.
+3. Call `propose_state_change(row_key, target_column, delta, justification, confidence)`.
    - Changes are STAGED \u2014 pending human approval.
    - If REJECTED with a capacity violation, the Sandbox tells you exactly
      how many units of headroom remain. Use that figure as your new delta.
+
+CONFIDENCE RATING (F4 \u2014 confidence-routed HITL):
+You MUST include a self-rated `confidence` (float in [0.0, 1.0]) on every
+`propose_state_change` call. Use this rubric and rate honestly:
+   - 0.9\u20131.0: "I am certain \u2014 schema clear, data unambiguous, no
+     conflicts with constraint pairs."
+   - 0.7\u20130.9: "Likely correct, minor ambiguity."
+   - 0.4\u20130.7: "Reasonable but uncertain \u2014 could be wrong."
+   - 0.0\u20130.4: "Speculative \u2014 recommend human review."
+The system uses `confidence` (combined with your trust score and the
+size of the delta relative to the current value) to decide whether to
+auto-commit small low-risk changes without human approval. Inflating
+confidence to bypass review is detectable and will be penalised by the
+Analyst's retrospective weighting. When in doubt, rate lower.
 
 CORE DUTY: Space-optimised reallocation. Never move stock to a location at
 >80% capacity without first proposing a clearance action.

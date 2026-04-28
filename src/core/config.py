@@ -146,3 +146,33 @@ LANGFUSE_HOST_ENV: str = "LANGFUSE_HOST"
 USE_LANGGRAPH: bool = os.environ.get(
     "SENTINEL_USE_LANGGRAPH", "false"
 ).lower() in ("1", "true", "yes", "on")
+
+# ---------------------------------------------------------------------------
+# F4 — Confidence-routed HITL ("human-on-the-loop")
+# ---------------------------------------------------------------------------
+# Auto-commit a staged change WITHOUT human approval iff ALL THREE hold:
+#   - agent.confidence            >= AUTO_COMMIT_CONFIDENCE_THRESHOLD
+#   - agent.trust_score           >= AUTO_COMMIT_TRUST_THRESHOLD
+#   - |delta| / current_value     <= AUTO_COMMIT_MAX_DELTA_FRACTION
+# Otherwise the change waits for human approval as before. Sandbox
+# re-validation runs at commit time regardless of which path is taken.
+#
+# AUTO_COMMIT_ENABLED is the master switch — defaults False so existing
+# deployments behave identically until explicitly opted-in via the env var
+# ``SENTINEL_AUTO_COMMIT_ENABLED``.
+
+#: Minimum self-rated agent confidence required for auto-commit (0.0–1.0).
+AUTO_COMMIT_CONFIDENCE_THRESHOLD: float = 0.85
+
+#: Minimum agent trust score required for auto-commit (0.0–1.0).
+AUTO_COMMIT_TRUST_THRESHOLD: float = 0.80
+
+#: Maximum |delta| / |current_value| ratio allowed for auto-commit (5%).
+AUTO_COMMIT_MAX_DELTA_FRACTION: float = 0.05
+
+#: Master switch for the entire confidence-routed HITL feature. When False
+#: (default), auto_commit_eligible always returns False and behaviour is
+#: byte-identical to pre-F4 deployments.
+AUTO_COMMIT_ENABLED: bool = os.environ.get(
+    "SENTINEL_AUTO_COMMIT_ENABLED", "false"
+).lower() in ("1", "true", "yes", "on")

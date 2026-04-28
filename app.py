@@ -807,6 +807,13 @@ def _render_chat_bubble(step: dict[str, Any]) -> None:
             unsafe_allow_html=True,
         )
 
+    elif step_type == "auto_commit":
+        # F4 — confidence-routed auto-commit notice.
+        st.markdown(
+            f'<div class="msg-safe">{html.escape(content)}</div>',
+            unsafe_allow_html=True,
+        )
+
     elif step_type == "error":
         st.error(f"❌ {content}")
 
@@ -869,6 +876,13 @@ def _render_crisis_console(trigger_crisis: CrisisEvent | None) -> None:
                         ss.chat_history.append(AI(content=step["content"]))
                     progress_placeholder.empty()
 
+            # ── F4 — Confidence-routed auto-commit pass ────────────────
+            # Runs after the specialist finishes staging. Only commits
+            # changes that pass auto_commit_eligible (confidence + trust
+            # + delta-fraction); ineligible changes remain staged for
+            # human approval. Master switch is config.AUTO_COMMIT_ENABLED.
+            _maybe_auto_commit()
+
         except RuntimeError as exc:
             ss.agent_steps.append({"type": "error", "content": f"Dispatcher failed: {exc}"})
         except Exception as exc:
@@ -909,10 +923,28 @@ def _render_crisis_console(trigger_crisis: CrisisEvent | None) -> None:
             for action_line in actions:
                 st.markdown(f"- {action_line}")
 
-        # Show count of staged changes
-        staged_count = len(ss.manager.pending_changes)
+        # Show count of staged changes (these are the changes that did
+        # NOT auto-commit — either the master switch is off, or one of
+        # the F4 thresholds was not met). Render confidence + skip-reason
+        # badges so the operator can see WHY each change is pending.
+        staged_count = ss.manager.pending_changes_count()
         if staged_count > 0:
-            st.info(f"📦 **{staged_count} state change(s)** validated by the Sandbox and staged for your approval.")
+            st.info(
+                f"📦 **{staged_count} state change(s)** validated by the Sandbox "
+                f"and staged for your approval."
+            )
+            with st.expander("🔍 Confidence & auto-commit eligibility", expanded=False):
+                for ch in ss.manager.pending_changes:
+                    conf = ch.get("confidence")
+                    conf_str = f"{conf:.2f}" if isinstance(conf, (int, float)) else "n/a"
+                    skip_reason = ch.get("_auto_commit_skip_reason", "—")
+                    st.markdown(
+                        f"- **{ch.get('row_key')}.{ch.get('target_column')}** "
+                        f"`{ch.get('delta', 0):+}` · "
+                        f"agent=`{ch.get('agent_id', 'unknown')}` · "
+                        f"confidence=`{conf_str}` · "
+                        f"_not auto-committed_: {skip_reason}"
+                    )
 
         # ── Monte Carlo uncertainty quantification (optional, pre-commit) ───
         if ss.manager.pending_changes:
@@ -981,6 +1013,59 @@ def _render_crisis_console(trigger_crisis: CrisisEvent | None) -> None:
     )
     if user_query:
         _handle_direct_query(user_query)
+
+
+def _maybe_auto_commit() -> None:
+    """F4 — Run a confidence-routed auto-commit pass after the specialist.
+
+    If ``config.AUTO_COMMIT_ENABLED`` is False (default), this is a no-op
+    and behaviour is byte-identical to pre-F4 deployments. When enabled,
+    we ask ``commit_pending_changes(auto_only=True)`` to commit only the
+    high-confidence + high-trust + small-delta changes; everything else
+    remains staged for the human operator. Sandbox re-validation runs at
+    commit time on every change regardless of which path was taken.
+    """
+    if not config.AUTO_COMMIT_ENABLED:
+        return
+    if ss.manager is None or ss.manager.pending_changes_count() == 0:
+        return
+
+    try:
+        summary = commit_pending_changes(ss.manager, auto_only=True)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Auto-commit pass failed: %s", exc, exc_info=True)
+        ss.agent_steps.append({
+            "type": "error",
+            "content": f"Auto-commit pass failed: {exc}",
+        })
+        return
+
+    auto_count = int(summary.get("auto_committed_count", 0))
+    if auto_count > 0:
+        change_summary = "; ".join(
+            f"{c['row_key']}.{c['target_column']} {c['delta']:+.0f} "
+            f"(conf={c.get('confidence', 0.0):.2f})"
+            for c in summary.get("auto_committed", [])
+        )
+        ss.agent_steps.append({
+            "type": "auto_commit",
+            "content": (
+                f"⚡ Auto-committed {auto_count} high-confidence change(s) "
+                f"without human approval: {change_summary}"
+            ),
+            "auto_committed": summary.get("auto_committed", []),
+        })
+
+    deferred_count = int(summary.get("deferred_count", 0))
+    if deferred_count > 0:
+        # Soft notice — these are still in the HITL queue for review.
+        ss.agent_steps.append({
+            "type": "system",
+            "content": (
+                f"🧑‍⚖️ {deferred_count} change(s) require human approval "
+                f"(below auto-commit thresholds)."
+            ),
+        })
 
 
 def _handle_approval(proposal_text: str) -> None:
@@ -1120,6 +1205,7 @@ def _handle_direct_query(query: str) -> None:
                         ss.pending_crisis = synthetic_crisis
                         ss.chat_history.append(HM(content=query))
                         ss.chat_history.append(AI(content=step["content"]))
+                _maybe_auto_commit()
             except Exception as exc:
                 ss.agent_steps.append({"type": "error", "content": str(exc)})
     else:
