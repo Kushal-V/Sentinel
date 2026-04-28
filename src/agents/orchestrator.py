@@ -26,7 +26,7 @@ from __future__ import annotations
 import logging
 import os
 import re
-from typing import Any, Generator, Literal
+from typing import Any, Generator, List, Literal
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
@@ -123,6 +123,52 @@ class ScannerResult(BaseModel):
     crises: list[CrisisEvent] = Field(
         description="List of detected anomalies posing a risk to the supply chain.",
         default_factory=list,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Analyst Trust-Delta Schemas (replaces fragile regex parsing of free-text)
+# ---------------------------------------------------------------------------
+
+class TrustDeltaUpdate(BaseModel):
+    """A single trust-score adjustment proposed by the Analyst LLM.
+
+    The ``delta`` is bounded at the schema layer so a hallucinated extreme
+    swing (e.g. -1.0) is rejected by Pydantic before it can be applied. The
+    writer (``FactoryDataManager.update_trust_score``) clamps further to the
+    global ``[MIN_TRUST_SCORE, MAX_TRUST_SCORE]`` window.
+
+    Attributes:
+        agent_id: Agent identifier matching keys in agent_trust_scores.json.
+        delta: Trust score adjustment, clamped at writer side.
+        reasoning: One-sentence justification for this adjustment.
+    """
+    agent_id: str = Field(
+        description="Agent identifier matching keys in agent_trust_scores.json"
+    )
+    delta: float = Field(
+        ge=-0.15,
+        le=0.15,
+        description="Trust score adjustment, clamped at writer side",
+    )
+    reasoning: str = Field(
+        description="One-sentence justification for this adjustment"
+    )
+
+
+class AnalystReview(BaseModel):
+    """Structured output schema for the Analyst LLM call.
+
+    Replaces the fragile free-text regex parser. The Analyst returns a
+    list of zero or more ``TrustDeltaUpdate`` objects plus a free-text
+    summary intended for UI rendering.
+    """
+    updates: List[TrustDeltaUpdate] = Field(
+        default_factory=list,
+        description="Per-agent trust score adjustments to apply.",
+    )
+    summary: str = Field(
+        description="Overall analyst observation"
     )
 
 
@@ -697,11 +743,21 @@ class AgentOrchestrator:
         passed directly in the prompt.  The large context window of llama-3.3-70b
         is ideal for processing the entire CSV log in a single pass.
 
+        This implementation uses ``with_structured_output(AnalystReview)`` to
+        force the LLM to emit a strict Pydantic schema.  The fragile regex
+        parser of the previous implementation is gone — if the LLM drifts
+        (one decimal, missing colon, "N/A" output), Pydantic surfaces an
+        exception immediately rather than silently freezing trust scores.
+
+        Multi-tenancy: the set of valid agent IDs is read live from the data
+        manager (``get_trust_scores().keys()``).  Agent IDs are NEVER
+        hardcoded so a custom ``AGENT_IDS`` roster works transparently.
+
         Args:
             chat_history: Current session message history for context.
 
         Returns:
-            The Analyst's final verdict string for display in the UI.
+            The Analyst's summary string for display in the UI.
         """
         log_df = self._data_manager.get_transaction_log()
         if log_df.empty:
@@ -709,48 +765,58 @@ class AgentOrchestrator:
 
         log_summary = log_df.to_string(index=False, max_rows=50)
         input_text = (
-            f"Review the following transaction ledger and produce verdicts "
-            f"for each agent. Apply trust score deltas where warranted.\n\n"
+            f"Review the following transaction ledger and produce per-agent "
+            f"trust score updates where warranted.\n\n"
             f"TRANSACTION LOG:\n{log_summary}"
         )
 
         try:
-            # Direct Groq chat call — no tool loop needed for pure analysis
+            # Bind structured output: the LLM is forced to return AnalystReview.
+            analyst_chain = self._analyst_llm.with_structured_output(AnalystReview)
             messages: list[Any] = [
                 SystemMessage(content=ANALYST_SYSTEM_PROMPT),
                 *list(chat_history),
                 HumanMessage(content=input_text),
             ]
-            response = self._analyst_llm.invoke(messages)
-            analyst_output: str = str(response.content) if response.content else ""
+            review: AnalystReview = analyst_chain.invoke(messages)
 
-            # Parse trust delta directives: "TRUST SCORE DELTA: -0.12" or "TRUST SCORE DELTA: + 0.12"
-            agent_sections = re.findall(
-                r"AGENT:\s*(\w+).*?TRUST SCORE DELTA:\s*([+-]?\s*\d+\.\d+)",
-                analyst_output,
-                re.DOTALL | re.IGNORECASE,
-            )
-            for raw_agent_id, raw_delta in agent_sections:
-                agent_id_clean = raw_agent_id.lower().strip()
-                if agent_id_clean in config.AGENT_IDS:
-                    try:
-                        # Clean up any inner spaces before parsing float
-                        delta_str = raw_delta.replace(" ", "")
-                        delta = max(-0.15, min(0.15, float(delta_str)))
-                        updated = self._data_manager.update_trust_score(
-                            agent_id=agent_id_clean,
-                            score_delta=delta,
-                        )
-                        logger.info(
-                            "Analyst applied trust delta | agent=%s | delta=%+.4f | new=%.4f",
-                            agent_id_clean,
-                            delta,
-                            updated["trust_score"],
-                        )
-                    except (ValueError, KeyError) as exc:
-                        logger.warning("Could not apply trust delta for '%s': %s", agent_id_clean, exc)
+            # Discover valid agent IDs dynamically from the live trust roster
+            # (multi-tenant: never hardcode).  Falls back to the top-level keys
+            # of get_trust_scores() if the canonical "agents" subdict is absent.
+            trust_data = self._data_manager.get_trust_scores()
+            agents_section = trust_data.get("agents", trust_data) if isinstance(trust_data, dict) else {}
+            valid_agents: set[str] = set(agents_section.keys()) if isinstance(agents_section, dict) else set()
 
-            return analyst_output
+            for update in review.updates:
+                agent_id_clean = update.agent_id.strip()
+                if agent_id_clean not in valid_agents:
+                    logger.warning(
+                        "Analyst proposed delta for unknown agent_id '%s'; "
+                        "skipping. Valid agents: %s",
+                        update.agent_id,
+                        sorted(valid_agents),
+                    )
+                    continue
+                try:
+                    updated = self._data_manager.update_trust_score(
+                        agent_id=agent_id_clean,
+                        score_delta=update.delta,
+                    )
+                    logger.info(
+                        "Analyst applied trust delta | agent=%s | delta=%+.4f | new=%.4f | reason=%s",
+                        agent_id_clean,
+                        update.delta,
+                        updated["trust_score"],
+                        update.reasoning,
+                    )
+                except (ValueError, KeyError) as exc:
+                    logger.warning(
+                        "Could not apply trust delta for '%s': %s",
+                        agent_id_clean,
+                        exc,
+                    )
+
+            return review.summary
 
         except Exception as exc:
             error_msg = f"Analyst execution failed: {exc}"

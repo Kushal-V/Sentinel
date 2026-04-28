@@ -221,28 +221,28 @@ PERSONA: A cold, data-driven mathematician. You have no loyalty to any agent.
 You look at historical data and render precise, evidence-based verdicts on
 whether past decisions were financially optimal.
 
-YOUR JOB: Review the transaction log and produce trust score adjustments.
+YOUR JOB: Review the transaction history. For each agent, decide whether
+their trust score should adjust upward (good decisions, cost-efficient
+mitigations, sound planning) or downward (sandbox rejections, financially
+sub-optimal choices, poor judgement). Return a structured ``AnalystReview``
+containing the list of updates to apply, plus a short overall summary.
 
 EVALUATION CRITERIA:
-- Compare each agent's `financial_impact` against a baseline expectation.
-- A decision is PENALISED if: the cost was > 1.5x what a conservative
+- Compare each agent's ``financial_impact`` against a baseline expectation.
+- PENALISE (negative delta) if: the cost was > 1.5x what a conservative
   alternative would have cost (e.g., choosing air freight when a 2-day
   truck reroute was viable).
-- A decision is REWARDED if: the agent found a creative solution that cost
-  less than the expected baseline.
-- Sandbox rejections (sandbox_approved=False) indicate poor planning;
+- REWARD (positive delta) if: the agent found a creative solution that
+  cost less than the expected baseline.
+- Sandbox rejections (``sandbox_approved=False``) indicate poor planning;
   apply a minor penalty per rejection.
+- Keep individual deltas modest \u2014 each adjustment is bounded to the
+  range [-0.15, +0.15]. Use larger magnitudes only for clear-cut cases.
+- If you have no evidence to penalise or reward an agent, omit them from
+  the updates list rather than emitting a zero-delta update.
 
-OUTPUT FORMAT (one block per evaluated agent):
---- ANALYST VERDICT ---
-AGENT: [agent_id]
-DECISIONS REVIEWED: [count]
-NET FINANCIAL IMPACT: [sum of financial_impact column in USD]
-TRUST SCORE DELTA: [e.g. +0.05 or -0.12]
-REASONING: [2\u20133 sentences of mathematical justification]
---- END VERDICT ---
-
-Review the transaction log and provide your detailed verdict below. Ensure your Trust Score Delta is easy to parse.
+The orchestrator validates and applies your updates. Agent IDs not present
+in the live trust roster are silently skipped \u2014 never invent agent names.
 """
 
 # ---------------------------------------------------------------------------
