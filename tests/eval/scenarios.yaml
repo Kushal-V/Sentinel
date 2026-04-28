@@ -1,0 +1,64 @@
+# tests/eval/scenarios.yaml
+# =========================
+# Declarative crisis scenarios for the Sentinel eval harness.
+#
+# Each scenario describes a crisis input + the expected outcome.  The runner
+# (tests/eval/runner.py) executes the scenario against a (mock or live)
+# orchestrator and compares the actual result to the `expectations` block.
+#
+# Schema (per entry):
+#   name (str, required)         — unique identifier
+#   description (str)            — human-readable purpose
+#   crisis (dict, required)      — input payload; must contain `type`
+#     type (str)                 — STOCK_LOW | SHIPMENT_DELAY | QUALITY_ISSUE | ...
+#     sku (str)                  — primary key the specialist should target
+#     severity (str)              — optional severity hint
+#   trust_overrides (dict)       — optional: agent_id -> trust score
+#                                  applied before dispatch to test fallback paths
+#   expectations (dict)          — keys checked by metrics:
+#     selected_agent (str)         — final routed agent (after trust override)
+#     sandbox_approved (bool)      — whether propose_state_change was SAFE
+#     min_tool_calls (int)         — minimum tool invocations expected
+#     trust_override_applied (bool) — whether routing was overridden
+
+- name: low_stock_routes_to_maker
+  description: Stock below reorder threshold should route to maker agent.
+  crisis:
+    type: STOCK_LOW
+    sku: WIDGET_A
+    severity: medium
+  expectations:
+    selected_agent: maker
+    sandbox_approved: true
+    min_tool_calls: 3
+    trust_override_applied: false
+
+- name: trust_override_fires_when_low_score
+  description: >
+    Agent with trust score below ROUTING_THRESHOLD (0.50) should be
+    overridden to its configured fallback per config.AGENT_FALLBACKS.
+  crisis:
+    type: SHIPMENT_DELAY
+    sku: WIDGET_B
+    severity: high
+  trust_overrides:
+    mover: 0.3
+  expectations:
+    # mover is the default route for SHIPMENT_DELAY; with score 0.3 the
+    # orchestrator overrides to mover's fallback (config.AGENT_FALLBACKS["mover"] == "keeper").
+    selected_agent: keeper
+    sandbox_approved: true
+    min_tool_calls: 3
+    trust_override_applied: true
+
+- name: quality_issue_routes_to_keeper
+  description: A quality / audit signal should route to the keeper agent.
+  crisis:
+    type: QUALITY_ISSUE
+    sku: WIDGET_C
+    severity: low
+  expectations:
+    selected_agent: keeper
+    sandbox_approved: true
+    min_tool_calls: 3
+    trust_override_applied: false
