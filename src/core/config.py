@@ -67,6 +67,20 @@ FINANCIAL_PENALTY_FACTOR: float = 1.5
 SANDBOX_MAX_RETRIES: int = 3
 
 # ---------------------------------------------------------------------------
+# Monte Carlo Simulation
+# ---------------------------------------------------------------------------
+
+#: Default number of stochastic runs the Monte Carlo simulator executes when
+#: the human approver triggers a pre-commit uncertainty check from the HITL
+#: panel.  1000 strikes a balance between distribution stability and UI latency.
+MONTE_CARLO_DEFAULT_RUNS: int = 1000
+
+#: Standard deviation (as a fraction of the proposed delta) of the multiplicative
+#: Gaussian noise applied to each pending change during simulation.  ``0.10``
+#: corresponds to ±10% noise — a realistic supply-chain execution variance.
+MONTE_CARLO_NOISE_STD_PCT: float = 0.10
+
+# ---------------------------------------------------------------------------
 # LLM Configuration — Multi-Provider Setup
 # ---------------------------------------------------------------------------
 

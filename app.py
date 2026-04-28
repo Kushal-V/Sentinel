@@ -907,6 +907,37 @@ def _render_crisis_console(trigger_crisis: CrisisEvent | None) -> None:
         if staged_count > 0:
             st.info(f"📦 **{staged_count} state change(s)** validated by the Sandbox and staged for your approval.")
 
+        # ── Monte Carlo uncertainty quantification (optional, pre-commit) ───
+        if ss.manager.pending_changes:
+            with st.expander("🎲 Monte Carlo Simulation (optional)", expanded=False):
+                n_runs = st.slider(
+                    "Runs",
+                    min_value=100,
+                    max_value=5000,
+                    value=config.MONTE_CARLO_DEFAULT_RUNS,
+                    step=100,
+                    key="mc_n_runs",
+                )
+                if st.button("Run Simulation", key="mc_run_btn"):
+                    from src.core.simulator import MonteCarloSimulator
+                    sim = MonteCarloSimulator(
+                        live_df=ss.manager.get_inventory(),
+                        schema=ss.manager.get_schema_profile(),
+                        pending_changes=ss.manager.pending_changes,
+                        n_runs=n_runs,
+                        noise_std_pct=config.MONTE_CARLO_NOISE_STD_PCT,
+                    )
+                    with st.spinner(f"Running {n_runs} simulations..."):
+                        result = sim.run()
+                    st.metric("Rejection rate", f"{result.rejection_rate:.1%}")
+                    if result.metrics:
+                        df_metrics = pd.DataFrame(result.metrics).T
+                        st.dataframe(df_metrics)
+                    if result.constraint_violations:
+                        st.warning(
+                            f"Sample violations: {result.constraint_violations[:3]}"
+                        )
+
         col_approve, col_reject, col_spacer = st.columns([2, 2, 6])
         with col_approve:
             if st.button("✅ Approve & Execute", type="primary", use_container_width=True):
