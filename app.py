@@ -54,6 +54,7 @@ from src.agents.orchestrator import AgentOrchestrator, CrisisEvent, DispatchRout
 from src.core import config
 from src.core.schema_engine import DynamicSchemaInferencer
 from src.core.state_manager import FactoryDataManager
+from src.observability.tracing import init_tracing, status_summary
 from src.tools.tool_registry import (
     SENTINEL_TOOLS,
     get_data_manager,
@@ -61,6 +62,11 @@ from src.tools.tool_registry import (
     commit_pending_changes,
     discard_pending_changes,
 )
+
+# Initialise Langfuse observability before any LLM client is constructed.
+# Idempotent and side-effect-free when env vars are absent — the call site
+# does not need to branch on availability.
+init_tracing()
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -606,6 +612,7 @@ def _render_sidebar() -> CrisisEvent | None:
 
         st.divider()
         st.caption("Sentinel v1.0 · Groq (All Agents)")
+        st.caption(status_summary())
 
     return trigger_crisis
 

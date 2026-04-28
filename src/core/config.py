@@ -113,3 +113,22 @@ AGENT_FALLBACKS: dict[str, str] = {
     "mover": "keeper",
     "keeper": "maker",
 }
+
+# ---------------------------------------------------------------------------
+# Observability — Langfuse LLM tracing (auto-enabled when env vars present)
+# ---------------------------------------------------------------------------
+# These constants document the env-var names the observability layer reads.
+# The actual ``os.environ`` lookups happen in
+# ``src/observability/tracing.py`` so this module stays import-free of any
+# observability runtime. Tracing is auto-enabled when both the public and
+# secret keys are present; absence of either disables it (no-op path).
+
+#: Env-var holding the Langfuse public key (required to enable tracing).
+LANGFUSE_PUBLIC_KEY_ENV: str = "LANGFUSE_PUBLIC_KEY"
+
+#: Env-var holding the Langfuse secret key (required to enable tracing).
+LANGFUSE_SECRET_KEY_ENV: str = "LANGFUSE_SECRET_KEY"
+
+#: Optional self-hosted Langfuse URL. Defaults to https://cloud.langfuse.com
+#: when unset (handled by the Langfuse SDK).
+LANGFUSE_HOST_ENV: str = "LANGFUSE_HOST"

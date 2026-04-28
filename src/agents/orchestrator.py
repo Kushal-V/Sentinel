@@ -45,6 +45,7 @@ from src.agents.prompts import (
 from src.core import config
 from src.core.state_manager import FactoryDataManager
 from src.agents.groq_recovery import parse_groq_xml_tool_call
+from src.observability.tracing import get_callbacks
 from src.tools.tool_registry import INFO_TOOLS, SENTINEL_TOOLS
 
 logger = logging.getLogger(__name__)
@@ -209,12 +210,17 @@ class AgentOrchestrator:
         """
         self._data_manager: FactoryDataManager = data_manager
 
+        # Resolve the Langfuse callback list once. Empty list when tracing
+        # is disabled — a fully supported LangChain configuration.
+        _tracing_callbacks = get_callbacks()
+
         # ── 1. Dispatcher — small, fast, strict JSON (Groq / gemma2-9b-it) ─────────
         self._dispatcher_llm: ChatGroq = ChatGroq(
             api_key=os.environ.get("GROQ_API_KEY"),
             model=config.DISPATCHER_MODEL,
             temperature=0,          # Zero temp for deterministic routing JSON
             max_retries=2,
+            callbacks=_tracing_callbacks,
         )
 
         # ── 2. Specialists — fast + high-reasoning (Groq / Llama) ────────────
@@ -223,6 +229,7 @@ class AgentOrchestrator:
             model=config.SPECIALIST_MODEL,
             temperature=0.2,        # Slight creativity for mitigation proposals
             max_retries=2,
+            callbacks=_tracing_callbacks,
         )
 
         # ── 3. Analyst — large context window (Groq / Llama-3.3-70b) ─────────
@@ -231,6 +238,7 @@ class AgentOrchestrator:
             model=config.ANALYST_MODEL,
             temperature=0,          # Zero temp for deterministic trust evaluation
             max_retries=2,
+            callbacks=_tracing_callbacks,
         )
 
         self._dispatcher_chain = self._build_dispatcher_chain()

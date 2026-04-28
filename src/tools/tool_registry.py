@@ -52,6 +52,7 @@ from langchain_core.tools import tool
 from src.agents.groq_recovery import parse_groq_xml_tool_call
 from src.core.sandbox import SandboxResult, ShadowSandbox
 from src.core.state_manager import FactoryDataManager
+from src.observability.tracing import get_callbacks
 
 logger = logging.getLogger(__name__)
 
@@ -128,6 +129,7 @@ def _get_ask_other_agent_client() -> "ChatGroq":
             model="llama-3.1-8b-instant",
             temperature=0.1,
             max_retries=2,
+            callbacks=get_callbacks(),
         )
         logger.debug("Initialised cached ChatGroq client for ask_other_agent.")
     return _ask_other_agent_client
