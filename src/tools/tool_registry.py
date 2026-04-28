@@ -800,6 +800,124 @@ def propose_state_change(
 # Tool 4 — Inter-Agent Communication
 # ---------------------------------------------------------------------------
 
+def _resolve_consultation_prompt(target_agent: str) -> Optional[str]:
+    """Look up a specialist persona's system prompt by canonical id.
+
+    Multi-tenant note: the roster is read from ``config.AGENT_IDS`` and
+    the actual prompt strings are pulled by name from ``src.agents.prompts``
+    (e.g. ``MAKER_SYSTEM_PROMPT``). No agent ids are hardcoded here, so
+    the consultation channel scales transparently to any roster.
+
+    Args:
+        target_agent: Free-form agent identifier as supplied by the
+            calling LLM (case-insensitive, may include whitespace).
+
+    Returns:
+        The persona's system prompt text augmented with the consultative-
+        role override, or ``None`` if the id is not in
+        ``config.AGENT_IDS``.
+    """
+    import src.agents.prompts as prompts
+
+    target_clean = target_agent.lower().strip()
+    valid_ids = {aid.lower() for aid in sentinel_config.AGENT_IDS}
+    if target_clean not in valid_ids:
+        return None
+
+    attr_name = f"{target_clean.upper()}_SYSTEM_PROMPT"
+    base_prompt = getattr(prompts, attr_name, None)
+    if not isinstance(base_prompt, str):
+        return None
+
+    # Redefine the core duty so the sub-agent doesn't try to use propose_state_change
+    return base_prompt + (
+        "\n\n=======================================================\n"
+        "CRITICAL OVERRIDE FOR CURRENT TASK:\n"
+        "You are currently acting in a CONSULTATIVE role answering another agent's question.\n"
+        "DO NOT attempt to use the propose_state_change tool.\n"
+        "Your ONLY goal is to evaluate the question, use query_data if needed, and reply with text."
+    )
+
+
+def _ask_other_agent_graph(
+    target_agent: str, question: str, caller_id: str
+) -> str:
+    """Graph-backed inter-agent consultation.
+
+    Builds a fresh ``build_specialist_graph`` bound to ``INFO_TOOLS``
+    (the consulted agent reads but never proposes) and returns the
+    final assistant text. Mirrors the legacy manual loop's contract:
+    a single string. Multi-tenant — agent roster + prompts resolved
+    dynamically via ``_resolve_consultation_prompt``.
+
+    Args:
+        target_agent: Free-form agent identifier the LLM supplied.
+        question: The consultative question text.
+        caller_id: The agent id that initiated the consultation; used
+            to label the question so the consulted agent has context.
+
+    Returns:
+        The consulted agent's final answer text, or an error string
+        starting with ``"COMMUNICATION ERR"`` on unknown roster ids.
+    """
+    from langchain_core.messages import (
+        AIMessage,
+        HumanMessage,
+        SystemMessage,
+    )
+    from src.agents.graph import build_specialist_graph
+
+    sys_prompt = _resolve_consultation_prompt(target_agent)
+    if sys_prompt is None:
+        valid = ", ".join(
+            sorted(aid.capitalize() for aid in sentinel_config.AGENT_IDS)
+        )
+        return (
+            f"COMMUNICATION ERR: Unknown agent '{target_agent}'. "
+            f"Options: {valid}."
+        )
+
+    target_clean = target_agent.lower().strip()
+    prompt_context = (
+        f"You are being consulted by the {caller_id.upper()} agent.\n"
+        f"QUESTION: {question}\n\n"
+        f"Use your lookup tools to check the current state if necessary, "
+        f"then provide a clear 'Yes' or 'No' recommendation with brief justification."
+    )
+
+    llm = _get_ask_other_agent_client()
+    # Read-only INFO_TOOLS only — the consulted agent must never propose
+    # mutations (its caller stages those via the SENTINEL_TOOLS path).
+    graph = build_specialist_graph(
+        llm=llm,
+        tools=INFO_TOOLS,
+        max_iterations=6,
+    )
+    initial_state: dict[str, Any] = {
+        "messages": [
+            SystemMessage(content=sys_prompt),
+            HumanMessage(content=prompt_context),
+        ],
+        "iteration_count": 0,
+        "max_iterations": 6,
+        "agent_id": f"sub_{target_clean}",
+    }
+
+    try:
+        final = graph.invoke(initial_state)
+    except Exception as exc:  # noqa: BLE001
+        logger.error("ask_other_agent graph invocation failed: %s", exc, exc_info=True)
+        return f"Sub-agent failed (graph error): {exc}"
+
+    answer = final.get("final_answer") or ""
+    if not answer:
+        for msg in reversed(final.get("messages", [])):
+            if isinstance(msg, AIMessage) and isinstance(msg.content, str) and msg.content.strip():
+                answer = msg.content
+                break
+    return answer or "Sub-agent failed to respond."
+
+
 @tool
 def ask_other_agent(target_agent: str, question: str, config: RunnableConfig) -> str:
     """Ask a question to another specialist agent (Maker, Mover, Keeper).
@@ -819,6 +937,19 @@ def ask_other_agent(target_agent: str, question: str, config: RunnableConfig) ->
     Returns:
         The text response from the consulted agent.
     """
+    caller_id = _infer_calling_agent(config)
+    logger.info(
+        "Agent '%s' is asking '%s': %s",
+        caller_id,
+        target_agent.lower().strip(),
+        question,
+    )
+
+    # Phase 4b — LangGraph migration. Behind the same flag as the
+    # specialist + answer_query paths so the three migrate together.
+    if sentinel_config.USE_LANGGRAPH:
+        return _ask_other_agent_graph(target_agent, question, caller_id)
+
     try:
         from langchain_core.messages import (
             AIMessage,
@@ -826,28 +957,18 @@ def ask_other_agent(target_agent: str, question: str, config: RunnableConfig) ->
             SystemMessage,
             ToolMessage,
         )
-        import src.agents.prompts as prompts
+
+        sys_prompt = _resolve_consultation_prompt(target_agent)
+        if sys_prompt is None:
+            valid = ", ".join(
+                sorted(aid.capitalize() for aid in sentinel_config.AGENT_IDS)
+            )
+            return (
+                f"COMMUNICATION ERR: Unknown agent '{target_agent}'. "
+                f"Options: {valid}."
+            )
 
         target_clean = target_agent.lower().strip()
-
-        # Select the correct prompt
-        if target_clean == "maker":
-            sys_prompt = prompts.MAKER_SYSTEM_PROMPT
-        elif target_clean == "mover":
-            sys_prompt = prompts.MOVER_SYSTEM_PROMPT
-        elif target_clean == "keeper":
-            sys_prompt = prompts.KEEPER_SYSTEM_PROMPT
-        else:
-            return f"COMMUNICATION ERR: Unknown agent '{target_agent}'. Options: Maker, Mover, Keeper."
-
-        # Redefine the core duty so the sub-agent doesn't try to use propose_state_change
-        sys_prompt += (
-            "\n\n=======================================================\n"
-            "CRITICAL OVERRIDE FOR CURRENT TASK:\n"
-            "You are currently acting in a CONSULTATIVE role answering another agent's question.\n"
-            "DO NOT attempt to use the propose_state_change tool.\n"
-            "Your ONLY goal is to evaluate the question, use query_data if needed, and reply with text."
-        )
 
         # Reuse the module-level cached LLM client (see I9 — avoids
         # paying the ChatGroq constructor cost on every consultation).
@@ -857,15 +978,12 @@ def ask_other_agent(target_agent: str, question: str, config: RunnableConfig) ->
         sub_tools = [get_dataset_schema, query_data]
         llm_with_tools = llm.bind_tools(sub_tools)
 
-        caller_id = _infer_calling_agent(config)
         prompt_context = (
             f"You are being consulted by the {caller_id.upper()} agent.\n"
             f"QUESTION: {question}\n\n"
             f"Use your lookup tools to check the current state if necessary, "
             f"then provide a clear 'Yes' or 'No' recommendation with brief justification."
         )
-
-        logger.info("Agent '%s' is asking '%s': %s", caller_id, target_clean, question)
 
         # Run a short ReAct loop for the sub-agent
         messages: list[Any] = [

@@ -366,3 +366,187 @@ def test_graph_streams_incrementally():
     assert len(snapshots) >= 3
     final = snapshots[-1]
     assert final.get("final_answer") == "step2 final"
+
+
+# ---------------------------------------------------------------------------
+# Phase 4b — Orchestrator branch tests
+#
+# These exercise the LangGraph paths added in Phase 4b:
+#   * AgentOrchestrator._answer_query_graph
+#   * src.tools.tool_registry._ask_other_agent_graph (+ unknown-target err)
+# All use scripted LLMs only — no API keys, no network.
+# ---------------------------------------------------------------------------
+
+
+import importlib  # noqa: E402  (module-level imports kept above)
+import os  # noqa: E402
+
+
+def _build_orchestrator_for_test(workspaces_root):
+    """Helper: build an AgentOrchestrator backed by a tmp workspace."""
+    import src.core.config as cfg
+    import src.core.state_manager as sm
+    from src.core.state_manager import FactoryDataManager
+    from src.tools.tool_registry import set_data_manager
+
+    cfg.WORKSPACES_DIR = workspaces_root
+    sm.WORKSPACES_DIR = workspaces_root
+    dm = FactoryDataManager(workspace="graph_branch_test")
+    set_data_manager(dm)
+    os.environ.setdefault("GROQ_API_KEY", "test-key")
+
+    from src.agents.orchestrator import AgentOrchestrator
+
+    return AgentOrchestrator(dm), dm
+
+
+def test_answer_query_graph_yields_expected_steps(tmp_path):
+    """``_answer_query_graph`` emits tool_call → tool_result → final_answer."""
+    os.environ["SENTINEL_USE_LANGGRAPH"] = "true"
+    from src.core import config as cfg
+    importlib.reload(cfg)
+
+    workspaces = tmp_path / "graph_branch"
+    workspaces.mkdir()
+    orch, _ = _build_orchestrator_for_test(workspaces)
+
+    llm = FakeLLM([
+        AIMessage(
+            content="",
+            tool_calls=[{
+                "id": "t1",
+                "name": "get_dataset_schema",
+                "args": {},
+            }],
+        ),
+        AIMessage(content="info-final-answer"),
+    ])
+    orch._specialist_llm = llm
+
+    steps = list(orch.answer_query("what's in the dataset?", chat_history=[]))
+
+    types = [s.get("type") for s in steps]
+    assert "tool_call" in types, f"missing tool_call in {types}"
+    assert "tool_result" in types, f"missing tool_result in {types}"
+    assert "final_answer" in types, f"missing final_answer in {types}"
+
+    finals = [s for s in steps if s.get("type") == "final_answer"]
+    assert finals[-1]["content"] == "info-final-answer"
+    assert finals[-1]["agent_id"] == "info"
+
+    # First tool_call must reference the read-only schema tool we scripted.
+    first_call = next(s for s in steps if s.get("type") == "tool_call")
+    assert first_call["tool"] == "get_dataset_schema"
+
+
+def test_answer_query_graph_immediate_final(tmp_path):
+    """No tool calls → first AIMessage is the final answer."""
+    os.environ["SENTINEL_USE_LANGGRAPH"] = "true"
+    from src.core import config as cfg
+    importlib.reload(cfg)
+
+    workspaces = tmp_path / "graph_branch_imm"
+    workspaces.mkdir()
+    orch, _ = _build_orchestrator_for_test(workspaces)
+    orch._specialist_llm = FakeLLM([AIMessage(content="answered immediately")])
+
+    steps = list(orch.answer_query("hello", chat_history=[]))
+    finals = [s for s in steps if s.get("type") == "final_answer"]
+    assert len(finals) == 1
+    assert finals[-1]["content"] == "answered immediately"
+    assert finals[-1]["agent_id"] == "info"
+
+
+def test_ask_other_agent_graph_returns_final_answer(tmp_path, monkeypatch):
+    """``_ask_other_agent_graph`` returns the consulted agent's final text."""
+    os.environ["SENTINEL_USE_LANGGRAPH"] = "true"
+    from src.core import config as cfg
+    importlib.reload(cfg)
+
+    # Workspace + data manager so any tool the consulted agent invokes
+    # has a backing store. The scripted LLM never actually calls tools.
+    workspaces = tmp_path / "ask_other"
+    workspaces.mkdir()
+    _build_orchestrator_for_test(workspaces)
+
+    from src.tools import tool_registry
+
+    # Force the cached ChatGroq client to be our scripted LLM.
+    scripted = FakeLLM([AIMessage(content="answer is X")])
+    monkeypatch.setattr(
+        tool_registry, "_get_ask_other_agent_client", lambda: scripted
+    )
+
+    answer = tool_registry._ask_other_agent_graph(
+        target_agent="Maker",
+        question="Can production be increased?",
+        caller_id="keeper",
+    )
+    assert answer == "answer is X"
+
+
+def test_ask_other_agent_graph_unknown_target_returns_error(tmp_path):
+    """Unknown target_agent surfaces the COMMUNICATION ERR string."""
+    os.environ["SENTINEL_USE_LANGGRAPH"] = "true"
+    from src.core import config as cfg
+    importlib.reload(cfg)
+
+    workspaces = tmp_path / "ask_other_unknown"
+    workspaces.mkdir()
+    _build_orchestrator_for_test(workspaces)
+
+    from src.tools import tool_registry
+
+    answer = tool_registry._ask_other_agent_graph(
+        target_agent="ghost",
+        question="anything?",
+        caller_id="maker",
+    )
+    assert answer.startswith("COMMUNICATION ERR")
+    assert "ghost" in answer
+
+
+def test_ask_other_agent_tool_routes_through_graph_when_flag_set(
+    tmp_path, monkeypatch
+):
+    """The ``@tool`` ``ask_other_agent`` honours the ``USE_LANGGRAPH`` flag."""
+    os.environ["SENTINEL_USE_LANGGRAPH"] = "true"
+    from src.core import config as cfg
+    importlib.reload(cfg)
+
+    workspaces = tmp_path / "ask_other_tool"
+    workspaces.mkdir()
+    _build_orchestrator_for_test(workspaces)
+
+    from src.tools import tool_registry
+
+    # Mark whether the graph path was taken by stubbing it.
+    sentinel = {"called": False, "args": None}
+
+    def fake_graph(target_agent, question, caller_id):
+        sentinel["called"] = True
+        sentinel["args"] = (target_agent, question, caller_id)
+        return "graph path returned this"
+
+    monkeypatch.setattr(
+        tool_registry, "_ask_other_agent_graph", fake_graph
+    )
+    # Also reload config inside tool_registry so its ``sentinel_config``
+    # alias picks up the new flag value.
+    monkeypatch.setattr(
+        tool_registry.sentinel_config, "USE_LANGGRAPH", True
+    )
+
+    result = tool_registry.ask_other_agent.invoke(
+        {
+            "target_agent": "Mover",
+            "question": "Is the route clear?",
+        },
+        config={"configurable": {"agent_id": "maker"}},
+    )
+
+    assert sentinel["called"], "Graph path was not taken with flag on"
+    assert sentinel["args"][0] == "Mover"
+    assert sentinel["args"][1] == "Is the route clear?"
+    assert sentinel["args"][2] == "maker"
+    assert result == "graph path returned this"

@@ -757,6 +757,17 @@ class AgentOrchestrator:
         Yields:
             Dicts with keys ``"type"`` and ``"content"``.
         """
+        # Phase 4b — LangGraph migration. When the feature flag is on,
+        # delegate to the StateGraph path (mirrors run_specialist).
+        if config.USE_LANGGRAPH:
+            yield from self._answer_query_graph(
+                agent_id="info",
+                system_prompt=INFO_QUERY_SYSTEM_PROMPT,
+                query_text=query,
+                chat_history=chat_history,
+            )
+            return
+
         llm_with_tools = self._specialist_llm.bind_tools(INFO_TOOLS)
         tool_map: dict[str, Any] = {t.name: t for t in INFO_TOOLS}
 
@@ -843,6 +854,95 @@ class AgentOrchestrator:
             "content": final_text or "No relevant data found for your query.",
             "agent_id": "info",
         }
+
+    # ------------------------------------------------------------------
+    # Internal: LangGraph informational-query execution (Phase 4b, behind flag)
+    # ------------------------------------------------------------------
+
+    def _answer_query_graph(
+        self,
+        agent_id: str,
+        system_prompt: str,
+        query_text: str,
+        chat_history: list[HumanMessage | AIMessage],
+    ) -> Generator[dict[str, Any], None, None]:
+        """Execute an informational query via the LangGraph ``StateGraph``.
+
+        Mirrors ``_run_specialist_graph``'s shape but binds the read-only
+        ``INFO_TOOLS`` set (no ``propose_state_change``) and uses the
+        neutral ``INFO_QUERY_SYSTEM_PROMPT``. Only invoked when
+        ``config.USE_LANGGRAPH`` is True.
+
+        Args:
+            agent_id: Logical id surfaced on ``final_answer`` step dicts
+                (defaults to ``"info"`` for the chat assistant path).
+            system_prompt: The neutral system prompt to inject.
+            query_text: The user's question — becomes the human turn.
+            chat_history: Multi-turn LangChain message history.
+
+        Yields:
+            Step dicts in the exact shape ``app.py`` consumes from the
+            legacy manual loop.
+        """
+        # Local imports keep the legacy path free of any LangGraph
+        # dependency at module load time.
+        from src.agents.graph import (
+            build_specialist_graph,
+            messages_to_step_dicts,
+        )
+
+        max_iterations = 10
+        graph = build_specialist_graph(
+            llm=self._specialist_llm,
+            tools=INFO_TOOLS,
+            max_iterations=max_iterations,
+        )
+
+        initial_messages: list[Any] = [
+            SystemMessage(content=system_prompt),
+        ] + list(chat_history) + [
+            HumanMessage(content=query_text),
+        ]
+        initial_state: dict[str, Any] = {
+            "messages": initial_messages,
+            "iteration_count": 0,
+            "max_iterations": max_iterations,
+            "agent_id": agent_id,
+        }
+
+        prev_messages: list[Any] = list(initial_messages)
+        final_emitted = False
+        try:
+            for state in graph.stream(
+                initial_state, stream_mode="values"
+            ):
+                current_messages = state.get("messages", [])
+                new_steps = messages_to_step_dicts(
+                    prev_messages,
+                    current_messages,
+                    agent_id=agent_id,
+                    iteration=state.get("iteration_count", 0),
+                )
+                for step in new_steps:
+                    if step.get("type") == "final_answer":
+                        final_emitted = True
+                    yield step
+                prev_messages = list(current_messages)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("LangGraph informational-query execution failed")
+            yield {
+                "type": "error",
+                "content": f"Query execution failed: {exc}",
+            }
+            return
+
+        # Safety net: ensure the UI always sees a closing final_answer.
+        if not final_emitted:
+            yield {
+                "type": "final_answer",
+                "content": "No relevant data found for your query.",
+                "agent_id": agent_id,
+            }
 
     # ------------------------------------------------------------------
     # Public: Analyst (Trust Score Updater — Claim B engine)
