@@ -25,17 +25,25 @@ Tool Call Order (enforced via docstrings)
 3. ``propose_state_change()`` — Only after the agent has inspected the schema
    and the current row values.
 
-Singleton Pattern
------------------
-The module maintains a settable ``_data_manager`` reference via
-``get_data_manager()`` / ``set_data_manager()``.  In the Streamlit app,
-``app.py`` calls ``set_data_manager(ss.manager)`` on every rerun so that
-tools always operate on the same per-session ``FactoryDataManager`` instance
-stored in ``st.session_state``.
+Per-Context Data Manager (F6 — Multi-Tenant Session Isolation)
+---------------------------------------------------------------
+The module maintains a per-context ``FactoryDataManager`` reference via
+``get_data_manager()`` / ``set_data_manager()`` backed by a
+``contextvars.ContextVar``.  Each Streamlit session thread, asyncio task,
+or future FastAPI request gets its own copy — there is no longer a shared
+module-level singleton that one session can clobber for another.
+
+In the Streamlit app, ``app.py`` calls ``set_data_manager(ss.manager)``
+on every rerun.  Streamlit runs each session's script on a per-session
+script-runner thread, and ``ContextVar`` state is per-thread (and
+asyncio-task aware), so tools operate on the same per-session
+``FactoryDataManager`` instance stored in ``st.session_state`` without
+race conditions across concurrent sessions.
 """
 
 from __future__ import annotations
 
+import contextvars
 import json
 import logging
 import re
@@ -59,42 +67,98 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Settable Data Manager Singleton
+# Per-Context Data Manager (F6 — Multi-Tenant Session Isolation)
 # ---------------------------------------------------------------------------
+# A ``contextvars.ContextVar`` isolates the active ``FactoryDataManager``
+# across:
+#   - Streamlit session threads (each session has its own script-runner
+#     thread + context).
+#   - asyncio tasks (each task copies the current context — future
+#     FastAPI / MCP server deployments stay isolated by default).
+#   - Manual ``threading.Thread`` work, when callers use
+#     ``contextvars.copy_context().run(...)`` (the idiomatic pattern).
+#
+# Default sentinel: ``None`` means "no manager bound for this context".
+# ``get_data_manager()`` lazily creates a standalone ``FactoryDataManager``
+# in that case so unit-tests and standalone tool usage keep working.
 
-_data_manager: FactoryDataManager | None = None
+_data_manager_var: "contextvars.ContextVar[Optional[FactoryDataManager]]" = (
+    contextvars.ContextVar("sentinel_data_manager", default=None)
+)
+
+# Tombstone for backwards compatibility: a few legacy fixtures
+# (e.g. ``tests/test_mcp_server.py``) reset state by assigning
+# ``tool_registry._data_manager = None`` between tests.  After the
+# ContextVar refactor that assignment is functionally a no-op (the
+# real state lives in ``_data_manager_var``), but keeping the bare
+# name on the module prevents an ``AttributeError`` and lets those
+# fixtures continue to run unchanged.  Per-test isolation is now
+# achieved by each test calling ``set_data_manager(...)`` itself,
+# which writes into the ContextVar.
+_data_manager: Optional["FactoryDataManager"] = None
 
 
-def set_data_manager(dm: FactoryDataManager) -> None:
-    """Inject the session-scoped ``FactoryDataManager`` instance.
+def set_data_manager(
+    dm: Optional["FactoryDataManager"],
+) -> "contextvars.Token[Optional[FactoryDataManager]]":
+    """Bind a ``FactoryDataManager`` to the current context.
 
-    Called by ``app.py`` on every Streamlit rerun so that all tools operate
-    on the same in-memory state as the UI and orchestrator.  This ensures
-    per-session isolation: each Streamlit session's ``st.session_state.manager``
-    is the single source of truth.
+    Called by ``app.py`` on every Streamlit rerun so that all tools in
+    that session's thread operate on the same in-memory state as the UI
+    and orchestrator.  Because the binding lives on a ``ContextVar``,
+    concurrent Streamlit sessions (each on its own script-runner thread)
+    and concurrent asyncio tasks each see their own manager — no
+    cross-tenant bleed.
 
     Args:
-        dm: The ``FactoryDataManager`` instance from ``st.session_state``.
+        dm: The ``FactoryDataManager`` instance to bind, or ``None`` to
+            clear the binding for this context.
+
+    Returns:
+        A ``contextvars.Token`` which can be passed to
+        :func:`reset_data_manager` to restore the previous value.  Most
+        callers (Streamlit reruns) can ignore the return value — the
+        previous public API was ``-> None`` and a returned ``Token`` is
+        an additive, backward-compatible enrichment.
     """
-    global _data_manager
-    _data_manager = dm
-    logger.debug("Tool registry data manager set to %s.", id(dm))
+    token = _data_manager_var.set(dm)
+    logger.debug("Tool registry data manager set to %s.", id(dm) if dm is not None else None)
+    return token
 
 
-def get_data_manager() -> FactoryDataManager:
-    """Return the active ``FactoryDataManager`` instance.
+def get_data_manager() -> "FactoryDataManager":
+    """Return the active ``FactoryDataManager`` for the current context.
 
-    If ``set_data_manager`` has not been called yet (e.g. during tests or
-    standalone tool usage), a fresh instance is created as a fallback.
+    If ``set_data_manager`` has not been called for this context (e.g.
+    during direct unit-test invocation or standalone tool usage), a fresh
+    instance is created as a fallback and bound to this context — so
+    repeated calls within the same context see the same instance, but no
+    state leaks back to the parent context that spawned us.
 
     Returns:
         The active ``FactoryDataManager``.
     """
-    global _data_manager
-    if _data_manager is None:
+    dm = _data_manager_var.get()
+    if dm is None:
         logger.info("No data manager injected — creating standalone instance.")
-        _data_manager = FactoryDataManager()
-    return _data_manager
+        dm = FactoryDataManager()
+        _data_manager_var.set(dm)
+    return dm
+
+
+def reset_data_manager(
+    token: "contextvars.Token[Optional[FactoryDataManager]]",
+) -> None:
+    """Restore the previous data manager value using a ``Token``.
+
+    The token must be one previously returned by :func:`set_data_manager`
+    in the same context.  Useful for tests and nested scopes that want to
+    bind a temporary manager and then revert.
+
+    Args:
+        token: Token returned by an earlier ``set_data_manager`` call.
+    """
+    _data_manager_var.reset(token)
 
 
 # ---------------------------------------------------------------------------

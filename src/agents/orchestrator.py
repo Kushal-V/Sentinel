@@ -45,8 +45,13 @@ from src.agents.prompts import (
 from src.core import config
 from src.core.state_manager import FactoryDataManager
 from src.agents.groq_recovery import parse_groq_xml_tool_call
+from src.observability.cost_tracker import CostTracker
 from src.observability.tracing import get_callbacks
 from src.tools.tool_registry import INFO_TOOLS, SENTINEL_TOOLS
+
+# F7 — checkpointer for replay. Per-orchestrator MemorySaver lets the UI
+# re-render any past graph trace by thread_id without touching the LLM.
+from langgraph.checkpoint.memory import MemorySaver
 
 logger = logging.getLogger(__name__)
 
@@ -210,8 +215,18 @@ class AgentOrchestrator:
         """
         self._data_manager: FactoryDataManager = data_manager
 
+        # F10 — per-session cost tracker. Counts tokens, estimates USD,
+        # enforces MAX_LLM_USD_PER_SESSION (or warns when enforce=False).
+        self._cost_tracker = CostTracker(
+            max_usd=config.MAX_LLM_USD_PER_SESSION,
+            rates=config.MODEL_COST_PER_1K_TOKENS,
+            enforce=config.COST_TRACKING_ENFORCE,
+        )
+
         # Resolve the Langfuse callback list once. Empty list when tracing
-        # is disabled — a fully supported LangChain configuration.
+        # is disabled — a fully supported LangChain configuration. The
+        # cost tracker is always appended so token accounting works even
+        # without Langfuse keys.
         _tracing_callbacks = get_callbacks()
 
         # ── 1. Dispatcher — small, fast, strict JSON (Groq / gemma2-9b-it) ─────────
@@ -220,7 +235,7 @@ class AgentOrchestrator:
             model=config.DISPATCHER_MODEL,
             temperature=0,          # Zero temp for deterministic routing JSON
             max_retries=2,
-            callbacks=_tracing_callbacks,
+            callbacks=_tracing_callbacks + [self._cost_tracker],
         )
 
         # ── 2. Specialists — fast + high-reasoning (Groq / Llama) ────────────
@@ -229,7 +244,7 @@ class AgentOrchestrator:
             model=config.SPECIALIST_MODEL,
             temperature=0.2,        # Slight creativity for mitigation proposals
             max_retries=2,
-            callbacks=_tracing_callbacks,
+            callbacks=_tracing_callbacks + [self._cost_tracker],
         )
 
         # ── 3. Analyst — large context window (Groq / Llama-3.3-70b) ─────────
@@ -238,11 +253,18 @@ class AgentOrchestrator:
             model=config.ANALYST_MODEL,
             temperature=0,          # Zero temp for deterministic trust evaluation
             max_retries=2,
-            callbacks=_tracing_callbacks,
+            callbacks=_tracing_callbacks + [self._cost_tracker],
         )
 
         self._dispatcher_chain = self._build_dispatcher_chain()
         self._agent_graphs: dict[str, Any] = self._build_agent_graphs()
+
+        # F7 — In-memory checkpointer for graph replay. One MemorySaver
+        # per AgentOrchestrator instance keeps thread state isolated to a
+        # single Streamlit session (no cross-tenant leak). Swap to
+        # SqliteSaver / RedisSaver for cross-session persistence later.
+        self._checkpointer = MemorySaver()
+        self._recent_thread_ids: List[str] = []
 
         logger.info(
             "AgentOrchestrator initialised | dispatcher=%s | specialist=%s | analyst=%s",
@@ -250,6 +272,18 @@ class AgentOrchestrator:
             config.SPECIALIST_MODEL,
             config.ANALYST_MODEL,
         )
+
+    # ------------------------------------------------------------------
+    # Public: F10 cost tracker accessors
+    # ------------------------------------------------------------------
+
+    def get_cost_snapshot(self):
+        """Return a CostSnapshot for this orchestrator's running session."""
+        return self._cost_tracker.snapshot()
+
+    def reset_cost_tracker(self) -> None:
+        """Zero the per-session cost counters (used by the sidebar reset)."""
+        self._cost_tracker.reset()
 
     # ------------------------------------------------------------------
     # Private: Builder Methods
@@ -678,13 +712,32 @@ class AgentOrchestrator:
             build_specialist_graph,
             messages_to_step_dicts,
         )
+        import uuid
 
         max_iterations = 10
         graph = build_specialist_graph(
             llm=self._specialist_llm,
             tools=SENTINEL_TOOLS,
             max_iterations=max_iterations,
+            checkpointer=self._checkpointer,
         )
+
+        # F7 — Generate a unique thread_id per invocation and record it
+        # so the UI can list recent runs for replay. Cap at 50 most
+        # recent so the list never grows unbounded.
+        thread_id = f"specialist-{agent_id}-{uuid.uuid4().hex[:12]}"
+        self._recent_thread_ids.append(thread_id)
+        if len(self._recent_thread_ids) > 50:
+            self._recent_thread_ids = self._recent_thread_ids[-50:]
+        cfg = {"configurable": {"thread_id": thread_id}}
+
+        # Emit a synthetic step so app.py can show / store the thread id
+        # without needing to peek at orchestrator internals.
+        yield {
+            "type": "thread_started",
+            "thread_id": thread_id,
+            "agent_id": agent_id,
+        }
 
         initial_messages: list[Any] = [
             SystemMessage(content=system_prompt),
@@ -702,7 +755,7 @@ class AgentOrchestrator:
         final_emitted = False
         try:
             for state in graph.stream(
-                initial_state, stream_mode="values"
+                initial_state, config=cfg, stream_mode="values"
             ):
                 current_messages = state.get("messages", [])
                 new_steps = messages_to_step_dicts(
@@ -890,13 +943,28 @@ class AgentOrchestrator:
             build_specialist_graph,
             messages_to_step_dicts,
         )
+        import uuid
 
         max_iterations = 10
         graph = build_specialist_graph(
             llm=self._specialist_llm,
             tools=INFO_TOOLS,
             max_iterations=max_iterations,
+            checkpointer=self._checkpointer,
         )
+
+        # F7 — Unique thread_id per query, recorded for the replay UI.
+        thread_id = f"info-{agent_id}-{uuid.uuid4().hex[:12]}"
+        self._recent_thread_ids.append(thread_id)
+        if len(self._recent_thread_ids) > 50:
+            self._recent_thread_ids = self._recent_thread_ids[-50:]
+        cfg = {"configurable": {"thread_id": thread_id}}
+
+        yield {
+            "type": "thread_started",
+            "thread_id": thread_id,
+            "agent_id": agent_id,
+        }
 
         initial_messages: list[Any] = [
             SystemMessage(content=system_prompt),
@@ -914,7 +982,7 @@ class AgentOrchestrator:
         final_emitted = False
         try:
             for state in graph.stream(
-                initial_state, stream_mode="values"
+                initial_state, config=cfg, stream_mode="values"
             ):
                 current_messages = state.get("messages", [])
                 new_steps = messages_to_step_dicts(
@@ -1110,6 +1178,97 @@ class AgentOrchestrator:
                     
             except Exception as exc:
                 logger.error(f"Scanner execution failed for {agent_role}: {exc}", exc_info=True)
-                
+
         return all_crises
+
+    # ------------------------------------------------------------------
+    # F7: Replay (graph checkpointer integration)
+    # ------------------------------------------------------------------
+
+    def list_recent_threads(self) -> List[str]:
+        """Return the most recently observed graph ``thread_id`` values.
+
+        Each ``_run_specialist_graph`` / ``_answer_query_graph`` call
+        appends a unique thread ID to this list (capped at 50). The UI
+        consumes this for a "Replay past crisis run" picker.
+        """
+        return list(self._recent_thread_ids)
+
+    def replay_crisis(
+        self,
+        thread_id: str,
+    ) -> Generator[dict[str, Any], None, None]:
+        """Re-render a past graph trace from its checkpointed state.
+
+        Reads the final saved state for ``thread_id`` from the
+        ``MemorySaver`` and translates the recorded message history into
+        the same step-dict shape ``run_specialist`` yields. The LLM is
+        NOT re-invoked — this is a pure replay of what already ran.
+
+        Args:
+            thread_id: A thread ID previously emitted by
+                ``_run_specialist_graph`` / ``_answer_query_graph`` (and
+                surfaced via ``list_recent_threads``).
+
+        Yields:
+            Step dicts: ``thread_started`` once, then a ``tool_call`` /
+            ``tool_result`` / ``final_answer`` per recorded message.
+
+        Notes:
+            * One MemorySaver per orchestrator instance: replay is
+              session-scoped only. Threads from a previous Streamlit
+              session are not visible.
+            * If the thread ID is unknown to the checkpointer the
+              method yields a single ``error`` step.
+        """
+        from src.agents.graph import (
+            build_specialist_graph,
+            messages_to_step_dicts,
+        )
+        from src.tools.tool_registry import SENTINEL_TOOLS
+
+        graph = build_specialist_graph(
+            llm=self._specialist_llm,
+            tools=SENTINEL_TOOLS,
+            max_iterations=10,
+            checkpointer=self._checkpointer,
+        )
+        cfg = {"configurable": {"thread_id": thread_id}}
+
+        yield {
+            "type": "thread_started",
+            "thread_id": thread_id,
+            "agent_id": "replay",
+        }
+
+        try:
+            saved = graph.get_state(cfg)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("replay_crisis: get_state failed for %s", thread_id)
+            yield {
+                "type": "error",
+                "content": f"Replay failed for thread '{thread_id}': {exc}",
+            }
+            return
+
+        if saved is None or not getattr(saved, "values", None):
+            yield {
+                "type": "error",
+                "content": f"No checkpoint found for thread '{thread_id}'.",
+            }
+            return
+
+        recorded_messages = saved.values.get("messages", []) or []
+        agent_id = saved.values.get("agent_id", "replay")
+
+        # Diff against an empty list so messages_to_step_dicts treats
+        # every recorded message as "new" and emits one step per call.
+        steps = messages_to_step_dicts(
+            messages_before=[],
+            messages_after=list(recorded_messages),
+            agent_id=agent_id,
+            iteration=saved.values.get("iteration_count", 0),
+        )
+        for step in steps:
+            yield step
 

@@ -129,6 +129,7 @@ def build_specialist_graph(
     llm: BaseChatModel,
     tools: List[BaseTool],
     max_iterations: int = 10,
+    checkpointer: Optional[Any] = None,
 ):
     """Compile a generic specialist ``StateGraph``.
 
@@ -141,6 +142,14 @@ def build_specialist_graph(
         max_iterations: Hard cap on ``agent_node`` invocations. Matches
             the legacy loop's safety stop. Stored on the state so the
             agent node can short-circuit.
+        checkpointer: Optional langgraph checkpointer (e.g. ``MemorySaver``
+            from ``langgraph.checkpoint.memory``). When provided, the
+            compiled graph persists state at every super-step so a run
+            can be replayed later via
+            ``graph.invoke(None, config={"configurable": {"thread_id": "T1"}})``
+            or inspected via ``graph.get_state(config)``. When ``None``
+            (default) the graph compiles unchanged for full backward
+            compatibility with existing call sites.
 
     Returns:
         A compiled ``langgraph`` graph. Use:
@@ -277,6 +286,8 @@ def build_specialist_graph(
         {"tools": "tools", END: END},
     )
     graph.add_edge("tools", "agent")
+    if checkpointer is not None:
+        return graph.compile(checkpointer=checkpointer)
     return graph.compile()
 
 

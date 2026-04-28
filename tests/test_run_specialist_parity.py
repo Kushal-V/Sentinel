@@ -183,10 +183,17 @@ def _normalised_signature(steps: List[dict]) -> List[tuple]:
     Drops keys (``iteration``, ``agent_id`` on non-final steps) that are
     not user-facing and may differ in incidental ways between the two
     code paths. Preserves the parts the UI renders.
+
+    F7 — ``thread_started`` is a synthetic marker emitted by the
+    LangGraph path so the UI can record a checkpointer thread_id. It is
+    parity-irrelevant (UI-only metadata, no LLM/tool semantics) and is
+    excluded here.
     """
     sig: List[tuple] = []
     for s in steps:
         kind = s.get("type")
+        if kind == "thread_started":
+            continue  # F7 synthetic marker, ignored for parity
         if kind == "final_answer":
             sig.append((kind, None, s.get("content"), s.get("agent_id")))
         elif kind in ("tool_call", "tool_result"):

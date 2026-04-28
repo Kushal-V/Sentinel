@@ -10,6 +10,7 @@ of hard-coding magic strings or numbers.
 
 import os
 from pathlib import Path
+from typing import Dict
 
 # ---------------------------------------------------------------------------
 # Root Paths
@@ -133,6 +134,28 @@ LANGFUSE_SECRET_KEY_ENV: str = "LANGFUSE_SECRET_KEY"
 #: Optional self-hosted Langfuse URL. Defaults to https://cloud.langfuse.com
 #: when unset (handled by the Langfuse SDK).
 LANGFUSE_HOST_ENV: str = "LANGFUSE_HOST"
+
+# ---------------------------------------------------------------------------
+# F10 — Cost tracking
+# ---------------------------------------------------------------------------
+# Per-1k-token rates in USD: (input_rate, output_rate). Update when Groq
+# pricing changes. "default" used when model name is not in this map.
+MODEL_COST_PER_1K_TOKENS: Dict[str, tuple] = {
+    "llama-3.1-8b-instant": (0.00005, 0.00008),
+    "llama-3.3-70b-versatile": (0.00059, 0.00079),
+    "default": (0.0005, 0.0008),
+}
+
+#: Per-session USD budget cap. Once accumulated cost >= this, the next
+#: LLM call raises BudgetExceededError. Set high to disable enforcement
+#: in development.
+MAX_LLM_USD_PER_SESSION: float = float(os.environ.get("SENTINEL_MAX_LLM_USD", "5.00"))
+
+#: Master switch — when False, the tracker still counts but does not
+#: raise on budget breach.
+COST_TRACKING_ENFORCE: bool = os.environ.get("SENTINEL_COST_ENFORCE", "true").lower() in (
+    "1", "true", "yes", "on"
+)
 
 # ---------------------------------------------------------------------------
 # Feature Flags — Phase 4 (LangGraph migration)

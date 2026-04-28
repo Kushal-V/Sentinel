@@ -614,6 +614,22 @@ def _render_sidebar() -> CrisisEvent | None:
         st.caption("Sentinel v1.0 · Groq (All Agents)")
         st.caption(status_summary())
 
+        # F10 — cost tracker
+        if "orchestrator" in ss and ss.orchestrator is not None:
+            snap = ss.orchestrator.get_cost_snapshot()
+            st.markdown("---")
+            st.caption("💰 LLM cost (this session)")
+            cols = st.columns(2)
+            cols[0].metric("USD", f"${snap.estimated_usd:.4f}")
+            cols[1].metric("Tokens", f"{snap.total_tokens:,}")
+            if snap.estimated_usd >= config.MAX_LLM_USD_PER_SESSION * 0.8:
+                st.warning(
+                    f"Approaching cap: ${config.MAX_LLM_USD_PER_SESSION:.2f}"
+                )
+            if st.button("Reset cost counter"):
+                ss.orchestrator.reset_cost_tracker()
+                st.rerun()
+
     return trigger_crisis
 
 
@@ -992,6 +1008,38 @@ def _render_crisis_console(trigger_crisis: CrisisEvent | None) -> None:
                 ss.pending_proposal = None
                 ss.pending_route = None
                 st.rerun()
+
+    # ── F7: Replay past crisis run ────────────────────────────────────────
+    # Sits BELOW the HITL panel (not in the sidebar). Reads thread IDs
+    # recorded by the orchestrator's MemorySaver-backed graph runs and
+    # lets the operator re-render any past trace step-by-step.
+    orchestrator_obj = ss.get("orchestrator", None)
+    if orchestrator_obj is not None and hasattr(orchestrator_obj, "list_recent_threads"):
+        try:
+            recent_threads = orchestrator_obj.list_recent_threads()
+        except Exception:  # noqa: BLE001
+            recent_threads = []
+        if recent_threads:
+            with st.expander("⏪ Replay past crisis run", expanded=False):
+                st.caption(
+                    "Pick a thread ID from a previous graph run in this "
+                    "session to re-render its step trail (no LLM calls)."
+                )
+                picked = st.selectbox(
+                    "Thread",
+                    list(reversed(recent_threads)),
+                    key="replay_thread_select",
+                )
+                if st.button("Run replay", key="replay_run_btn"):
+                    st.write(f"Replaying thread: `{picked}`")
+                    try:
+                        replay_steps = list(
+                            orchestrator_obj.replay_crisis(picked)
+                        )
+                        for step in replay_steps:
+                            st.json(step)
+                    except Exception as exc:  # noqa: BLE001
+                        st.error(f"Replay failed: {exc}")
 
     # ── Custom chat input ─────────────────────────────────────────────────
     st.divider()
