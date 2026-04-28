@@ -39,13 +39,17 @@ from __future__ import annotations
 import json
 import logging
 import re
-from typing import Any
+from typing import TYPE_CHECKING, Any, Optional
 
 import pandas as pd
+
+if TYPE_CHECKING:
+    from langchain_groq import ChatGroq
 
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 
+from src.agents.groq_recovery import parse_groq_xml_tool_call
 from src.core.sandbox import SandboxResult, ShadowSandbox
 from src.core.state_manager import FactoryDataManager
 
@@ -92,6 +96,44 @@ def get_data_manager() -> FactoryDataManager:
 
 
 # ---------------------------------------------------------------------------
+# Cached ChatGroq client for ask_other_agent (I9)
+# ---------------------------------------------------------------------------
+# ``ask_other_agent`` previously instantiated a fresh ``ChatGroq`` client on
+# every call. Each instantiation runs the LangChain validation pipeline and
+# resets HTTP keep-alive, so high-frequency consultation between specialists
+# wasted both CPU and connection setup time. We hoist it to a module-level
+# lazy-initialised singleton — the model and credentials never change at
+# runtime, so caching is safe.
+
+_ask_other_agent_client: Optional["ChatGroq"] = None
+
+
+def _get_ask_other_agent_client() -> "ChatGroq":
+    """Return a cached ``ChatGroq`` client for the ``ask_other_agent`` tool.
+
+    The first call constructs the client using the same kwargs the inline
+    instantiation used (model ``llama-3.1-8b-instant``, ``temperature=0.1``,
+    ``max_retries=2``). Subsequent calls return the same instance.
+
+    Returns:
+        A configured ``ChatGroq`` client suitable for binding sub-agent
+        lookup tools.
+    """
+    global _ask_other_agent_client
+    if _ask_other_agent_client is None:
+        from langchain_groq import ChatGroq
+        import os
+        _ask_other_agent_client = ChatGroq(
+            api_key=os.environ.get("GROQ_API_KEY"),
+            model="llama-3.1-8b-instant",
+            temperature=0.1,
+            max_retries=2,
+        )
+        logger.debug("Initialised cached ChatGroq client for ask_other_agent.")
+    return _ask_other_agent_client
+
+
+# ---------------------------------------------------------------------------
 # Two-Phase Commit — Staging Queue for HITL Approval
 # ---------------------------------------------------------------------------
 
@@ -109,7 +151,12 @@ def commit_pending_changes() -> list[dict[str, Any]]:
     dm = get_data_manager()
     committed: list[dict[str, Any]] = []
 
-    for change in dm.pending_changes:
+    # Atomically drain the queue so concurrent appends from another
+    # tool invocation cannot have a change silently lost between the
+    # read and the reset. Failed changes are re-staged below.
+    drained = dm.clear_pending_changes()
+
+    for change in drained:
         # Re-validate against the CURRENT state (not the stale staging-time state)
         live_df = dm.get_inventory()
         sandbox = ShadowSandbox(live_df)
@@ -127,6 +174,8 @@ def commit_pending_changes() -> list[dict[str, Any]]:
                 change["delta"],
                 result.rejection_reason,
             )
+            # Re-stage the rejected change so the user can retry.
+            dm.add_pending_change(change)
             continue
 
         try:
@@ -156,13 +205,9 @@ def commit_pending_changes() -> list[dict[str, Any]]:
             )
         except Exception as exc:
             logger.error("Failed to commit staged change: %s", exc, exc_info=True)
+            # Re-stage on update failure so the change isn't silently lost.
+            dm.add_pending_change(change)
 
-    # Only clear committed changes; keep failed ones for retry
-    committed_keys = {(c["row_key"], c["target_column"]) for c in committed}
-    dm.pending_changes = [
-        c for c in dm.pending_changes
-        if (c["row_key"], c["target_column"]) not in committed_keys
-    ]
     return committed
 
 
@@ -172,8 +217,8 @@ def discard_pending_changes() -> int:
     Returns the count of changes discarded.
     """
     dm = get_data_manager()
-    count = len(dm.pending_changes)
-    dm.pending_changes = []
+    drained = dm.clear_pending_changes()
+    count = len(drained)
     logger.info("Discarded %d staged changes.", count)
     return count
 
@@ -181,50 +226,9 @@ def discard_pending_changes() -> int:
 # ---------------------------------------------------------------------------
 # Groq XML Tool-Call Recovery Helper
 # ---------------------------------------------------------------------------
-
-def parse_groq_xml_tool_call(error_str: str) -> tuple[str, dict[str, Any]] | None:
-    """Parse a Groq XML tool call from an API error message.
-
-    Groq/Llama models sometimes emit ``<function=name>args</function>`` XML
-    instead of proper JSON tool calls, causing a 400 error.  This function
-    extracts the tool name and arguments from the error string so the
-    orchestrator can execute the intended tool call.
-
-    Args:
-        error_str: The string representation of the Groq API error.
-
-    Returns:
-        A ``(tool_name, args_dict)`` tuple, or ``None`` if no XML tool call
-        was found in the error string.
-    """
-    match = re.search(
-        r"<function=(\w+)[^>]*>(.*?)</function>"
-        r"|<function=(\w+)(.*?)</function>",
-        error_str,
-    )
-    if not match:
-        return None
-
-    tool_name = match.group(1) or match.group(3)
-    args_str = (match.group(2) or match.group(4) or "").strip()
-
-    try:
-        args = json.loads(args_str)
-    except (json.JSONDecodeError, ValueError):
-        # Fallback heuristic for kwarg-style strings like 'search_term="SFT-HD"'
-        val = re.sub(
-            r'^.*?search_term\s*=\s*["\'](.*)["\'].*$', r"\1", args_str
-        ).strip()
-        if val == args_str:
-            val = args_str.replace('"', "").replace("'", "").strip()
-        args = {"search_term": val}
-
-    # If propose_state_change args failed to parse, return empty dict
-    # so the tool returns a helpful error instead of crashing.
-    if tool_name == "propose_state_change" and not isinstance(args, dict):
-        args = {}
-
-    return (tool_name, args)
+# The parse_groq_xml_tool_call helper has moved to ``src.agents.groq_recovery``.
+# It is imported above so legacy import paths (``from src.tools.tool_registry
+# import parse_groq_xml_tool_call``) continue to resolve.
 
 
 # ---------------------------------------------------------------------------
@@ -539,7 +543,7 @@ def propose_state_change(
             "financial_impact": financial_impact,
             "agent_id": _infer_calling_agent(config),
         }
-        dm.pending_changes.append(staged_change)
+        dm.add_pending_change(staged_change)
 
         staged_response: dict[str, Any] = {
             "status": "STAGED",
@@ -593,14 +597,12 @@ def ask_other_agent(target_agent: str, question: str, config: RunnableConfig) ->
         The text response from the consulted agent.
     """
     try:
-        from langchain_groq import ChatGroq
         from langchain_core.messages import (
             AIMessage,
             HumanMessage,
             SystemMessage,
             ToolMessage,
         )
-        import os
         import src.agents.prompts as prompts
 
         target_clean = target_agent.lower().strip()
@@ -624,13 +626,9 @@ def ask_other_agent(target_agent: str, question: str, config: RunnableConfig) ->
             "Your ONLY goal is to evaluate the question, use query_data if needed, and reply with text."
         )
 
-        # Instantiate a temporary LLM for the sub-agent
-        llm = ChatGroq(
-            api_key=os.environ.get("GROQ_API_KEY"),
-            model="llama-3.1-8b-instant",
-            temperature=0.1,
-            max_retries=2,
-        )
+        # Reuse the module-level cached LLM client (see I9 — avoids
+        # paying the ChatGroq constructor cost on every consultation).
+        llm = _get_ask_other_agent_client()
 
         # Bind lookup tools only (don't let sub-agents propose state changes themselves)
         sub_tools = [get_dataset_schema, query_data]
@@ -660,7 +658,8 @@ def ask_other_agent(target_agent: str, question: str, config: RunnableConfig) ->
             except Exception as e:
                 parsed = parse_groq_xml_tool_call(str(e))
                 if parsed:
-                    t_name, t_args = parsed
+                    t_name = parsed["tool_name"]
+                    t_args = parsed["arguments"]
                     if t_name in tool_map:
                         try:
                             res = tool_map[t_name].invoke(
@@ -765,6 +764,59 @@ def _infer_calling_agent(config: RunnableConfig) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Tool 5 — Past Incident Retrieval (RAG over transaction log) — F3
+# ---------------------------------------------------------------------------
+
+@tool
+def query_past_incidents(crisis_summary: str, top_k: int = 5) -> str:
+    """Retrieve past incidents semantically similar to the current crisis.
+
+    Use this tool to find historical context — e.g., "supplier X had a
+    similar shortage 3 months ago, was resolved by reordering Y."  The
+    backing store is a per-workspace TF-IDF index over every committed
+    transaction (and rejection), so it expands the analyst/specialist
+    context window beyond the rolling 50-row CSV truncation in
+    ``run_analyst``.
+
+    Args:
+        crisis_summary: A short description of the current crisis.
+        top_k: Number of past incidents to return (clamped to 1-10).
+
+    Returns:
+        Formatted multi-line string of past incidents with similarity
+        scores, or a short status message when no matches are found.
+    """
+    try:
+        dm = get_data_manager()
+        if dm is None:
+            return "ERROR: No data manager configured."
+
+        memory = dm.get_incident_memory()
+        if memory is None:
+            return "ERROR: Incident memory unavailable in this environment."
+        if memory.count() == 0:
+            return "No past incidents available."
+
+        capped_k = max(1, min(int(top_k), 10))
+        results = memory.query(crisis_summary, top_k=capped_k)
+        if not results:
+            return "No semantically similar past incidents found."
+
+        lines = [f"Found {len(results)} similar past incidents:"]
+        for i, r in enumerate(results, 1):
+            lines.append(
+                f"{i}. [{r.get('timestamp', '?')}] "
+                f"(similarity={r.get('similarity', 0.0):.2f}) "
+                f"{r.get('description', '')}"
+            )
+        return "\n".join(lines)
+    except Exception as exc:  # noqa: BLE001
+        error_msg = f"TOOL ERROR — query_past_incidents failed: {exc}"
+        logger.error(error_msg, exc_info=True)
+        return error_msg
+
+
+# ---------------------------------------------------------------------------
 # Tool registry export
 # ---------------------------------------------------------------------------
 
@@ -775,10 +827,12 @@ SENTINEL_TOOLS: list = [
     query_data,
     propose_state_change,
     ask_other_agent,
+    query_past_incidents,
 ]
 
 #: Read-only tools for informational queries — no state mutation allowed.
 INFO_TOOLS: list = [
     get_dataset_schema,
     query_data,
+    query_past_incidents,
 ]

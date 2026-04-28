@@ -25,6 +25,7 @@ Usage
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import logging
@@ -32,9 +33,12 @@ import threading
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional, TYPE_CHECKING
 
 import pandas as pd
+
+if TYPE_CHECKING:
+    from src.core.incident_memory import IncidentMemory
 
 from src.core.config import (
     AGENT_FALLBACKS,
@@ -249,7 +253,19 @@ class FactoryDataManager:
         # Per-session staging queue for two-phase commit (HITL approval).
         # Changes are STAGED here by propose_state_change and only COMMITTED
         # when the human clicks "Approve & Execute" in the UI.
-        self.pending_changes: list[dict[str, Any]] = []
+        # PRIVATE: mutate ONLY through add_pending_change /
+        # clear_pending_changes / get_pending_changes — those acquire
+        # ``_write_lock`` and prevent races under concurrent tool execution.
+        self._pending_changes: list[dict[str, Any]] = []
+
+        # F3 — Transaction observers (e.g., IncidentMemory indexer).
+        # Callbacks are invoked at the tail of every successful
+        # log_transaction; failures are isolated.
+        self._transaction_observers: list[Callable[[dict[str, Any]], None]] = []
+
+        # F3 — Lazy-init handle for the per-workspace incident memory.
+        # See ``get_incident_memory`` — instantiated on first access.
+        self._incident_memory: "IncidentMemory | None" = None
 
         logger.info(
             "FactoryDataManager initialised. Inventory rows: %d | "
@@ -486,12 +502,81 @@ class FactoryDataManager:
             # unconditionally drop the cache (keep paired signature in sync).
             self._schema_cache = None
             self._schema_cache_signature = None
-            self.pending_changes.clear()
+            self._pending_changes.clear()
         logger.info(
             "Inventory updated in-place for workspace '%s'. Rows: %d. "
             "Transaction log and trust scores preserved.",
             self._workspace, len(new_df),
         )
+
+    # ------------------------------------------------------------------
+    # Public: Pending-changes staging queue (two-phase commit)
+    # ------------------------------------------------------------------
+
+    def add_pending_change(self, change: dict[str, Any]) -> None:
+        """Atomically append a single staged change to the queue.
+
+        Acquires ``_write_lock`` for the append so concurrent
+        ``propose_state_change`` invocations cannot interleave list
+        mutations and lose entries.
+
+        Args:
+            change: A dict describing the staged proposal (row_key,
+                target_column, delta, justification, agent_id, ...).
+        """
+        with self._write_lock:
+            self._pending_changes.append(change)
+
+    def get_pending_changes(self) -> list[dict[str, Any]]:
+        """Return a deep copy of the current pending-changes queue.
+
+        Callers receive an isolated snapshot — mutating the returned
+        list (or the dicts inside it) cannot affect the manager's
+        internal state.
+
+        Returns:
+            A deep-copied ``list[dict]`` of staged changes.
+        """
+        with self._write_lock:
+            return copy.deepcopy(self._pending_changes)
+
+    def clear_pending_changes(self) -> list[dict[str, Any]]:
+        """Atomically drain ALL staged changes and return them.
+
+        Pops the entire queue under ``_write_lock``, so a concurrent
+        ``add_pending_change`` cannot have a change silently dropped
+        between the read and the reset. Returns the drained snapshot
+        for callers that want to inspect what was discarded.
+
+        Returns:
+            A deep-copied ``list[dict]`` of the changes that were
+            cleared (empty list if none were staged).
+        """
+        with self._write_lock:
+            drained = copy.deepcopy(self._pending_changes)
+            self._pending_changes.clear()
+            return drained
+
+    def pending_changes_count(self) -> int:
+        """Return the current length of the staged-changes queue.
+
+        Returns:
+            Integer count of staged changes, read under ``_write_lock``.
+        """
+        with self._write_lock:
+            return len(self._pending_changes)
+
+    @property
+    def pending_changes(self) -> list[dict[str, Any]]:
+        """Read-only view of staged changes (deep copy).
+
+        Provided for backward compatibility with UI code that reads
+        ``manager.pending_changes`` directly. Returns a deep copy so
+        external mutation cannot corrupt internal state — to add or
+        clear changes, use ``add_pending_change`` /
+        ``clear_pending_changes`` instead.
+        """
+        return self.get_pending_changes()
 
     # ------------------------------------------------------------------
     # Public: Read operations
@@ -628,7 +713,7 @@ class FactoryDataManager:
             self._transaction_log = _build_empty_transaction_log()
             self._flush_transaction_log()
 
-            self.pending_changes.clear()
+            self._pending_changes.clear()
             # New dataset path: drop cache and signature together.
             self._schema_cache = None
             self._schema_cache_signature = None
@@ -797,6 +882,70 @@ class FactoryDataManager:
             financial_impact,
             sandbox_approved,
         )
+
+        # F3 — Notify observers (e.g., IncidentMemory).  Failures here
+        # MUST NOT break log_transaction itself, so each callback is
+        # isolated.  Iterate over a snapshot in case an observer
+        # registers/unregisters during iteration.
+        for observer in list(self._transaction_observers):
+            try:
+                observer(dict(record))
+            except Exception:  # noqa: BLE001
+                logger.exception(
+                    "Transaction observer failed (continuing).",
+                    extra={"observer": str(observer)},
+                )
+
+    def register_transaction_observer(
+        self, callback: Callable[[dict[str, Any]], None]
+    ) -> None:
+        """Register a callback invoked after every successful log_transaction.
+
+        The callback receives the full transaction dict (including
+        ``transaction_id``, ``timestamp``, ``event_id``, ``agent_id``,
+        ``action_schema``, ``financial_impact``, ``sandbox_approved``).
+
+        Exceptions raised inside the callback are caught and logged so
+        a faulty observer cannot break the ledger write path.
+
+        Args:
+            callback: Any callable accepting a single dict argument.
+        """
+        with self._write_lock:
+            self._transaction_observers.append(callback)
+        logger.debug(
+            "Registered transaction observer (%d total).",
+            len(self._transaction_observers),
+        )
+
+    def get_incident_memory(self) -> "IncidentMemory | None":
+        """Return the lazy-initialised incident memory for this workspace.
+
+        On first call, instantiates an ``IncidentMemory`` rooted at the
+        current workspace directory and registers its ``add`` method as
+        a transaction observer so future ``log_transaction`` calls are
+        indexed automatically.
+
+        Returns:
+            The shared ``IncidentMemory`` instance, or ``None`` if the
+            optional dependency (scikit-learn / numpy) is unavailable.
+        """
+        if self._incident_memory is None:
+            try:
+                from src.core.incident_memory import IncidentMemory
+            except ImportError:  # pragma: no cover — optional dep guard
+                logger.exception(
+                    "IncidentMemory unavailable — scikit-learn missing?"
+                )
+                return None
+            self._incident_memory = IncidentMemory(self._workspace_dir)
+            self.register_transaction_observer(self._incident_memory.add)
+            logger.info(
+                "IncidentMemory initialised for workspace '%s' (%d records).",
+                self._workspace,
+                self._incident_memory.count(),
+            )
+        return self._incident_memory
 
     def update_trust_score(self, agent_id: str, score_delta: float) -> dict[str, Any]:
         """Modify an agent's trust score by ``score_delta`` and persist to JSON.

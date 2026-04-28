@@ -44,7 +44,8 @@ from src.agents.prompts import (
 )
 from src.core import config
 from src.core.state_manager import FactoryDataManager
-from src.tools.tool_registry import INFO_TOOLS, SENTINEL_TOOLS, parse_groq_xml_tool_call
+from src.agents.groq_recovery import parse_groq_xml_tool_call
+from src.tools.tool_registry import INFO_TOOLS, SENTINEL_TOOLS
 
 logger = logging.getLogger(__name__)
 
@@ -479,7 +480,8 @@ class AgentOrchestrator:
                     # Recover from Groq/Llama XML <function=...> bug
                     parsed = parse_groq_xml_tool_call(str(e))
                     if parsed:
-                        t_name, t_args = parsed
+                        t_name = parsed["tool_name"]
+                        t_args = parsed["arguments"]
 
                         yield {
                             "type": "tool_call",
@@ -662,7 +664,8 @@ class AgentOrchestrator:
                 except Exception as e:
                     parsed = parse_groq_xml_tool_call(str(e))
                     if parsed:
-                        t_name, t_args = parsed
+                        t_name = parsed["tool_name"]
+                        t_args = parsed["arguments"]
                         yield {"type": "tool_call", "tool": t_name, "content": str(t_args)}
                         if t_name in tool_map:
                             try:
