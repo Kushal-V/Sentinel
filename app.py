@@ -615,11 +615,14 @@ def _render_sidebar() -> CrisisEvent | None:
             st.markdown(f"**{len(ss.suggested_crises)} potential crises detected**")
             st.caption("Click one to dispatch a specialist agent.")
             for i, c in enumerate(ss.suggested_crises):
-                if st.button(f"🔴 {c.severity}: {c.description[:80]}...", key=f"sugg_crisis_{i}"):
+                btn_key = f"sugg_crisis_{i}_{c.event_id or 'noid'}"
+                if st.button(f"🔴 {c.severity}: {c.description[:80]}...", key=btn_key):
+                    logger.info("User clicked suggested crisis %s (key=%s)", c.event_id, btn_key)
                     trigger_crisis = c
                     ss.agent_steps = []
                     ss.pending_proposal = None
                     ss.pending_route = None
+                    ss.crisis_running = False  # ensure not stuck
         st.divider()
 
         # ── Analyst Panel ─────────────────────────────────────────────────
@@ -861,6 +864,11 @@ def _render_chat_bubble(step: dict[str, Any]) -> None:
 
 def _render_crisis_console(trigger_crisis: CrisisEvent | None) -> None:
     """Render the Crisis Console tab with chat UI and Human-in-the-Loop controls."""
+    if trigger_crisis is not None:
+        logger.info(
+            "_render_crisis_console called with trigger_crisis=%s, crisis_running=%s",
+            trigger_crisis.event_id, ss.get("crisis_running"),
+        )
     st.markdown("## 🚨 Crisis Console")
 
     # Safety: reset stuck crisis_running flag (e.g. after Streamlit script kill)

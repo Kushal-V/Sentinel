@@ -1232,10 +1232,13 @@ class AgentOrchestrator:
                 ]
                 result: ScannerResult = scanner_chain.invoke(messages)
                 
-                # Tag crisis with the originating agent role mentally
+                # Tag crisis with originating agent role + always make event_id
+                # unique across the full scan (LLM often reuses "CRISIS-001" etc.).
+                seen_ids = {existing.event_id for existing in all_crises}
                 for c in result.crises:
-                    if not c.event_id or c.event_id == "unknown":
-                        c.event_id = f"EVT-{agent_role[:3].upper()}-{uuid.uuid4().hex[:4].upper()}"
+                    if (not c.event_id) or c.event_id == "unknown" or c.event_id in seen_ids:
+                        c.event_id = f"EVT-{agent_role[:3].upper()}-{uuid.uuid4().hex[:6].upper()}"
+                    seen_ids.add(c.event_id)
                     all_crises.append(c)
                     
             except Exception as exc:
