@@ -585,17 +585,42 @@ def _render_sidebar() -> CrisisEvent | None:
 
         st.divider()
 
-        # ── Suggested Crises (Auto-Detected) ──────────────────────────────
+        # ── Risk Scanner ──────────────────────────────────────────────────
+        st.markdown("### 🔍 Risk Scanner")
+        st.caption("Scan current inventory for potential crises (overflow, low stock, anomalies).")
+        scan_col1, scan_col2 = st.columns([3, 1])
+        with scan_col1:
+            scan_clicked = st.button("🔍 Scan for Crises", use_container_width=True, key="scan_button")
+        with scan_col2:
+            if getattr(ss, "suggested_crises", None):
+                if st.button("Clear", use_container_width=True, key="scan_clear"):
+                    ss.suggested_crises = []
+                    st.rerun()
+
+        if scan_clicked:
+            orch = _get_or_create_orchestrator()
+            if orch is None:
+                st.warning("Connect API key (GROQ_API_KEY) in .env first.")
+            else:
+                with st.spinner("Risk Scanner analyzing inventory..."):
+                    try:
+                        ss.suggested_crises = orch.scan_for_crises()
+                    except Exception as exc:
+                        st.error(f"Scanner failed: {exc}")
+                        ss.suggested_crises = []
+                if not ss.suggested_crises:
+                    st.info("✅ No crises detected. Inventory looks healthy.")
+
         if getattr(ss, "suggested_crises", None):
-            st.markdown("### 🔍 Suggested Crises")
-            st.caption("The Risk Scanner detected these potential issues in your data. Click one to trigger it.")
+            st.markdown(f"**{len(ss.suggested_crises)} potential crises detected**")
+            st.caption("Click one to dispatch a specialist agent.")
             for i, c in enumerate(ss.suggested_crises):
                 if st.button(f"🔴 {c.severity}: {c.description[:80]}...", key=f"sugg_crisis_{i}"):
                     trigger_crisis = c
                     ss.agent_steps = []
                     ss.pending_proposal = None
                     ss.pending_route = None
-            st.divider()
+        st.divider()
 
         # ── Analyst Panel ─────────────────────────────────────────────────
         st.markdown("### 📊 Run Analyst (Trust Review)")
